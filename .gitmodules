@@ -1,4 +1,4 @@
 [submodule "Lib/XivToolsWpf"]
 	path = Lib/XivToolsWpf
-	url = https://github.com/Aether-Tools/AetherToolsWpf
+	url = git@github.com:ergoxiv/AetherToolsWpf.git
 	branch = Anamnesis
