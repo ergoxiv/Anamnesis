@@ -3,6 +3,18 @@
 
 namespace Anamnesis.GUI;
 
+using Anamnesis;
+using Anamnesis.Actor;
+using Anamnesis.GUI.Dialogs;
+using Anamnesis.GUI.Views;
+using Anamnesis.Memory;
+using Anamnesis.Services;
+using Anamnesis.Updater;
+using Anamnesis.Utils;
+using Anamnesis.Views;
+using Anamnesis.Windows;
+using PropertyChanged;
+using Serilog;
 using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
@@ -11,21 +23,9 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
-using Anamnesis;
-using Anamnesis.GUI.Dialogs;
-using Anamnesis.GUI.Views;
-using Anamnesis.Memory;
-using Anamnesis.Actor;
-using Anamnesis.Services;
-using Anamnesis.Updater;
-using Anamnesis.Utils;
-using Anamnesis.Views;
-using Anamnesis.Windows;
-using PropertyChanged;
 using XivToolsWpf;
-using XivToolsWpf.Windows;
 using XivToolsWpf.Extensions;
-using Serilog;
+using XivToolsWpf.Windows;
 
 /// <summary>
 /// Interaction logic for MainWindow.xaml.
@@ -64,6 +64,19 @@ public partial class MainWindow : ChromedWindow
 	}
 
 	public static new bool IsActive => instance?.GetIsActive() ?? false;
+	public static GameService GameService => GameService.Instance;
+	public static SettingsService SettingsService => SettingsService.Instance;
+	public static GposeService GposeService => GposeService.Instance;
+	public static TargetService TargetService => TargetService.Instance;
+	public static MemoryService MemoryService => MemoryService.Instance;
+	public static LogService LogService => LogService.Instance;
+	public static UpdateService UpdateService => UpdateService.Instance;
+
+#if DEBUG
+	public static bool IsDebug => true;
+#else
+	public static bool IsDebug => false;
+#endif
 
 	public bool IsClosing { get; private set; } = false;
 	public bool IsDrawerOpen { get; private set; } = false;
@@ -74,25 +87,11 @@ public partial class MainWindow : ChromedWindow
 		set
 		{
 			if (value != Tabs.Actor)
-				this.TargetService.ClearSelection();
+				TargetService.ClearSelection();
 
 			this.tab = value;
 		}
 	}
-
-	public GameService GameService => GameService.Instance;
-	public SettingsService SettingsService => SettingsService.Instance;
-	public GposeService GposeService => GposeService.Instance;
-	public TargetService TargetService => TargetService.Instance;
-	public MemoryService MemoryService => MemoryService.Instance;
-	public LogService LogService => LogService.Instance;
-	public UpdateService UpdateService => UpdateService.Instance;
-
-#if DEBUG
-	public bool IsDebug => true;
-#else
-	public bool IsDebug => false;
-#endif
 
 	[DependsOn(nameof(Tab))]
 	public bool ShowHome
@@ -195,7 +194,7 @@ public partial class MainWindow : ChromedWindow
 		if (actor != null)
 		{
 			this.Tab = Tabs.Actor;
-			FrameworkElement? container = this.PinnedActorList.ItemContainerGenerator.ContainerFromItem(this.TargetService.CurrentlyPinned) as FrameworkElement;
+			FrameworkElement? container = this.PinnedActorList.ItemContainerGenerator.ContainerFromItem(TargetService.CurrentlyPinned) as FrameworkElement;
 			container?.BringIntoView();
 		}
 	}
@@ -334,7 +333,7 @@ public partial class MainWindow : ChromedWindow
 					TargetService.UnpinActor(actor);
 				}
 			}
-			catch(Exception ex)
+			catch (Exception ex)
 			{
 				Log.Error("Failed to despawn actor", ex);
 			}
