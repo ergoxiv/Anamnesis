@@ -3,17 +3,15 @@
 
 namespace Anamnesis.Actor.Views;
 
-using System;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
 using Anamnesis.Actor.Utilities;
 using Anamnesis.GameData;
 using Anamnesis.GameData.Excel;
 using Anamnesis.Keyboard;
 using Anamnesis.Services;
 using Anamnesis.Styles.Drawers;
-using PropertyChanged;
+using System;
+using System.Threading.Tasks;
+using System.Windows;
 using XivToolsWpf;
 
 public abstract class EquipmentSelectorDrawer : SelectorDrawer<IItem>
@@ -185,6 +183,11 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 
 	protected override int Compare(IItem itemA, IItem itemB)
 	{
+		if (itemA == null || itemB == null)
+		{
+			return 0;
+		}
+
 		if (itemA.IsFavorite && !itemB.IsFavorite)
 		{
 			return -1;
@@ -207,14 +210,13 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 			}
 		}
 
-		switch (this.SortMode)
+		return this.SortMode switch
 		{
-			case SortModes.Name: return itemA.Name.CompareTo(itemB.Name);
-			case SortModes.Row: return itemA.RowId.CompareTo(itemB.RowId);
-			case SortModes.Level: return itemA.EquipLevel.CompareTo(itemB.EquipLevel);
-		}
-
-		throw new NotImplementedException($"Sort mode {this.SortMode} not implemented");
+			SortModes.Name => itemA.Name.CompareTo(itemB.Name),
+			SortModes.Row => itemA.RowId.CompareTo(itemB.RowId),
+			SortModes.Level => itemA.EquipLevel.CompareTo(itemB.EquipLevel),
+			_ => throw new NotImplementedException($"Sort mode {this.SortMode} not implemented"),
+		};
 	}
 
 	protected override bool Filter(IItem item, string[]? search)

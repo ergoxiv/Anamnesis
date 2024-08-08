@@ -144,9 +144,7 @@
 
 				<XivToolsWpf:IconBlock Icon="SortAmountDown" FontSize="16"/>
 			</ComboBoxItem>
-
 		</ComboBox>
-
 
 		<StackPanel Grid.Row="1"
 					Grid.Column="1"
@@ -182,7 +180,7 @@
 
 			<xivToolsWpfSelectors:Selector.ItemTemplate>
 				<DataTemplate>
-					<Grid Height="32" Margin="0, -2">
+					<Grid Height="32" Margin="0, 4" HorizontalAlignment="Stretch">
 						<Grid.ColumnDefinitions>
 							<ColumnDefinition Width="Auto"/>
 							<ColumnDefinition/>
@@ -249,8 +247,8 @@
 						
 
 						<Rectangle Grid.ColumnSpan="3" 
-									   Grid.RowSpan="2" 
-									   Fill="Transparent" >
+								   Grid.RowSpan="2" 
+								   Fill="Transparent" HorizontalAlignment="Stretch" >
 							<ToolTipService.ToolTip>
 								<StackPanel Orientation="Vertical">
 									<TextBlock Text="{Binding Name}" FontWeight="DemiBold"/>

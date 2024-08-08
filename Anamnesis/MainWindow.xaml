@@ -11,6 +11,7 @@
 	xmlns:XivToolsWpfWindows="clr-namespace:XivToolsWpf.Windows;assembly=XivToolsWpf"
 	xmlns:tabs="clr-namespace:Anamnesis.Tabs"
 	xmlns:ana="clr-namespace:Anamnesis"
+	xmlns:local="clr-namespace:XivToolsWpf.Utility;assembly=XivToolsWpf"
 	Closing="Window_Closing"
 	Icon="/Assets/Anamnesis.ico"
 	Loaded="Window_Loaded"
@@ -26,9 +27,11 @@
 
 	<XivToolsWpfWindows:ChromedWindow.Resources>
 		<ResourceDictionary>
+			<local:BindingProxy x:Key="WindowProxy" Data="{Binding}" />
+
 			<DataTemplate x:Key="PinnedActor">
-				<Grid Margin="3,0">
-					<ToggleButton Height="32"
+                <Grid Margin="3,0">
+                    <ToggleButton Height="32"
 								  MinWidth="32"
 								  IsChecked="{Binding IsSelected}"
 								  PreviewMouseUp="OnActorPinPreviewMouseUp"
@@ -37,75 +40,73 @@
 								  Background="Red"
 								  HorizontalContentAlignment="Stretch">
 
-							<ToggleButton.ContextMenu>
-								<ContextMenu>
-									<MenuItem Click="OnUnpinActorClicked"
+                        <ToggleButton.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Click="OnUnpinActorClicked"
 											  Header="Unpin" />
 
-									<MenuItem Visibility="{Binding IsValid, Converter={StaticResource B2V}}" 
+                                <MenuItem Visibility="{Binding IsValid, Converter={StaticResource B2V}}" 
 											  Click="OnTargetActorClicked"
 											  Header="Target" />
 
-                                <MenuItem Visibility="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type Window}}, Path=SettingsService.Settings.UseExternalRefreshBrio, Converter={StaticResource B2V}}" 
-											  IsEnabled="{Binding IsGPoseActor}"
-											  Click="OnDespawnActorClicked"
-											  Header="Despawn" />
-                            </ContextMenu>
-							</ToggleButton.ContextMenu>
+                                <MenuItem Visibility="{Binding Source={StaticResource WindowProxy}, Path=Data.SettingsService.Settings.UseExternalRefreshBrio, Converter={StaticResource B2V}}" 
+													  IsEnabled="{Binding IsGPoseActor}"
+													  Click="OnDespawnActorClicked"
+													  Header="Despawn" />
+							</ContextMenu>
+						</ToggleButton.ContextMenu>
 
-						<Grid Margin="6,0">
-							<Grid.ColumnDefinitions>
-								<ColumnDefinition Width="Auto"/>
-								<ColumnDefinition Width="Auto"/>
-								<ColumnDefinition/>
-							</Grid.ColumnDefinitions>
+                        <Grid Margin="6,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition/>
+                            </Grid.ColumnDefinitions>
 
-							<Grid Margin="3, 0"
+                            <Grid Margin="3, 0"
 								  Grid.Column="0">
-								<XivToolsWpf:IconBlock Margin="2,1,1,2"
+                                <XivToolsWpf:IconBlock Margin="2,1,1,2"
 													   Icon="{Binding Icon}"
 													   Visibility="{Binding IsValid, Converter={StaticResource B2V}}"/>
 
-								<XivToolsWpf:IconBlock Margin="2,1,1,2"
+                                <XivToolsWpf:IconBlock Margin="2,1,1,2"
 													   Icon="TimesCircle"
 													   Foreground="Red"
 													   Visibility="{Binding IsValid, Converter={StaticResource !B2V}}"/>
-							</Grid>
+                            </Grid>
 
-							<XivToolsWpf:IconBlock FontSize="10"
+                            <XivToolsWpf:IconBlock FontSize="10"
 												   Grid.Column="1"
 												   Margin="3, 0, 3, 0"
 												   Icon="Camera"
 												   Visibility="{Binding IsGPoseActor, Converter={StaticResource B2V}}"/>
 
-							<TextBlock Margin="3,0,0,2"
+                            <TextBlock Margin="3,0,0,2"
 									   Grid.Column="2"
 									   HorizontalAlignment="Center"
 									   VerticalAlignment="Center"
 									   FontSize="14"
 									   FontWeight="SemiBold"
 									   Text="{Binding Initials}" />
-						</Grid>
-						
-						<ToggleButton.ToolTip>
-							<StackPanel>
-								<TextBlock>
-									<TextBlock.Text>
-										<MultiBinding StringFormat="{}{0} ({1})">
-											<Binding Path="DisplayName" />
-											<Binding Path="Kind" />
-										</MultiBinding>
-									</TextBlock.Text>
-								</TextBlock>
+                        </Grid>
 
-								<TextBlock Text="This actor could not be found" Visibility="{Binding IsValid, Converter={StaticResource !B2V}}" />
+                        <ToggleButton.ToolTip>
+                            <StackPanel>
+                                <TextBlock>
+                                    <TextBlock.Text>
+                                        <MultiBinding StringFormat="{}{0} ({1})">
+                                            <Binding Path="DisplayName" />
+                                            <Binding Path="Kind" />
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
 
-							</StackPanel>
-						</ToggleButton.ToolTip>
-					</ToggleButton>
-					</Grid>
-
-				</DataTemplate>
+                                <TextBlock Text="This actor could not be found" Visibility="{Binding IsValid, Converter={StaticResource !B2V}}" />
+                            </StackPanel>
+                        </ToggleButton.ToolTip>
+                    </ToggleButton>
+                </Grid>
+            </DataTemplate>
 
 			<Style x:Key="IconTab"
 				   TargetType="ToggleButton"
@@ -147,7 +148,7 @@
 				<ScaleTransform x:Name="WindowScale" ScaleX="0.5" ScaleY="0.5" />
 			</Grid.LayoutTransform>
 
-			<Grid IsEnabled="{Binding GposeService.IsNotChangingState}" Margin="3,0,3,3">
+			<Grid IsEnabled="{Binding GposeService.Initialized}" Margin="3,0,3,3">
 
 				<Grid.RowDefinitions>
 					<RowDefinition Height="Auto"/>
