@@ -29,14 +29,7 @@ public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 	public readonly List<BoneVisual3d> SelectedBones = new List<BoneVisual3d>();
 	public readonly HashSet<BoneVisual3d> HoverBones = new HashSet<BoneVisual3d>();
 
-	private readonly QuaternionRotation3D rootRotation;
-	private readonly List<BoneVisual3d> hairBones = new List<BoneVisual3d>();
-	private readonly List<BoneVisual3d> metBones = new List<BoneVisual3d>();
-	private readonly List<BoneVisual3d> topBones = new List<BoneVisual3d>();
-	private readonly List<BoneVisual3d> mainHandBones = new List<BoneVisual3d>();
-	private readonly List<BoneVisual3d> offHandBones = new List<BoneVisual3d>();
-
-	private readonly Dictionary<string, Tuple<string, string>> hairNameToSuffixMap = new()
+	private static readonly Dictionary<string, Tuple<string, string>> HairNameToSuffixMap = new()
 	{
 		{ "HairAutoFrontLeft", new("l", "j_kami_f_l") },	// Hair, Front Left
 		{ "HairAutoFrontRight", new("r", "j_kami_f_r") },	// Hair, Front Right
@@ -44,6 +37,13 @@ public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 		{ "HairAutoB", new("b", "j_kami_b") },				// Hair, Back Down
 		{ "HairFront", new("f", string.Empty) },			// Hair, Front (Custom Bone Name)
 	};
+
+	private readonly QuaternionRotation3D rootRotation;
+	private readonly List<BoneVisual3d> hairBones = new List<BoneVisual3d>();
+	private readonly List<BoneVisual3d> metBones = new List<BoneVisual3d>();
+	private readonly List<BoneVisual3d> topBones = new List<BoneVisual3d>();
+	private readonly List<BoneVisual3d> mainHandBones = new List<BoneVisual3d>();
+	private readonly List<BoneVisual3d> offHandBones = new List<BoneVisual3d>();
 
 	public SkeletonVisual3d()
 	{
@@ -749,10 +749,4 @@ public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 
 		return null;
 	}
-}
-
-#pragma warning disable SA1201
-public interface IBone
-{
-	BoneVisual3d? Visual { get; }
 }
