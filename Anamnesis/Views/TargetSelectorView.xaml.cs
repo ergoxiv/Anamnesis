@@ -3,12 +3,6 @@
 
 namespace Anamnesis.Views;
 
-using System;
-using System.ComponentModel;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows;
 using Anamnesis.Actor;
 using Anamnesis.Brio;
 using Anamnesis.Files;
@@ -16,6 +10,12 @@ using Anamnesis.Memory;
 using Anamnesis.Services;
 using Anamnesis.Styles.Drawers;
 using Serilog;
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
 using XivToolsWpf;
 
 public abstract class TargetSelectorDrawer : SelectorDrawer<ActorBasicMemory>
@@ -183,13 +183,9 @@ public partial class TargetSelectorView : TargetSelectorDrawer
 
 	private async void OnCreateActorClicked(object sender, RoutedEventArgs e)
 	{
-		SpawnOptions options = SpawnOptions.None;
-		if (PoseService.Instance.IsEnabled || PoseService.Instance.FreezeWorldPosition)
-			options |= SpawnOptions.ApplyModelPosition;
-
 		try
 		{
-			var nextActorId = await Brio.Spawn(options);
+			var nextActorId = await Brio.Spawn();
 			if (nextActorId != -1)
 			{
 				var actors = ActorService.Instance.GetAllActors(true);
@@ -226,7 +222,7 @@ public partial class TargetSelectorView : TargetSelectorDrawer
 				throw new Exception("Brio could not spawn actor");
 			}
 		}
-		catch(Exception ex)
+		catch (Exception ex)
 		{
 			Log.Error("Failed to spawn actor", ex);
 		}
