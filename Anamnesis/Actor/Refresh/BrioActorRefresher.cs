@@ -7,6 +7,7 @@ using Anamnesis.Brio;
 using Anamnesis.Files;
 using Anamnesis.Memory;
 using Anamnesis.Services;
+using Serilog;
 using System.Threading.Tasks;
 using XivToolsWpf;
 
@@ -18,27 +19,20 @@ public class BrioActorRefresher : IActorRefresher
 		if (!SettingsService.Current.UseExternalRefreshBrio)
 			return false;
 
+		// Brio doesn't support refresh on world-frozen actors.
+		// Trying to refresh a world-frozen actor will cause the actor to be
+		// sent to world origin (0, 0, 0).
+		if (PoseService.Instance.FreezeWorldPosition)
+			return false;
+
 		return true;
 	}
 
 	public async Task RefreshActor(ActorMemory actor)
 	{
 		await Dispatch.MainThread();
-		bool isPosing = PoseService.Instance.IsEnabled;
 
-		RedrawType redrawType = RedrawType.AllowFull | RedrawType.PreservePosition | RedrawType.AllowOptimized | RedrawType.ForceAllowNPCAppearance;
-
-		if (actor.IsWeaponDirty)
-		{
-			redrawType |= RedrawType.ForceRedrawWeaponsOnOptimized;
-		}
-
-		if (actor.IsOverworldActor || (actor.IsWeaponDirty && isPosing))
-		{
-			redrawType &= ~RedrawType.AllowOptimized;
-		}
-
-		if (isPosing)
+		if (PoseService.Instance.IsEnabled)
 		{
 			// Save the current pose
 			PoseFile poseFile = new PoseFile();
@@ -46,12 +40,11 @@ public class BrioActorRefresher : IActorRefresher
 			await skeletonVisual3D.SetActor(actor);
 			poseFile.WriteToFile(actor, skeletonVisual3D, null);
 
-			// Redraw
-			var result = await Brio.Redraw(actor.ObjectIndex, redrawType);
+			var result = await Brio.Redraw(actor.ObjectIndex);
+			Log.Verbose($"Brio redraw result: {result}");
+
 			if (result == "\"Full\"")
 			{
-				// TODO: It's probably best to find some way to detect when it's safe
-				// this is a good first attempt though.
 				new Task(async () =>
 				{
 					await Task.Delay(500);
@@ -66,8 +59,8 @@ public class BrioActorRefresher : IActorRefresher
 		}
 		else
 		{
-			// Outside of pose mode we can just refresh
-			await Brio.Redraw(actor.ObjectIndex, redrawType);
+			var result = await Brio.Redraw(actor.ObjectIndex);
+			Log.Verbose($"Brio redraw result: {result}");
 		}
 	}
 }
