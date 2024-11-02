@@ -379,7 +379,8 @@ public partial class PosePage : UserControl
 			if (result.File is not PoseFile poseFile)
 				return;
 
-			Dictionary<string, Vector3> bonePositions = new();
+			Dictionary<string, Vector3> bodyPositions = new();
+			Dictionary<string, Vector3> facePositions = new();
 			bool mismatchedFaceBones = false;
 
 			// Disable auto-commit at the beginning
@@ -422,6 +423,12 @@ public partial class PosePage : UserControl
 				return;
 			}
 
+			// Backup face bone positions before importing the body pose.
+			// "Freeze Position" toggle resets them, so restore after import. Relevant only when pose service is enabled.
+			this.Skeleton.SelectHead();
+			facePositions = this.Skeleton.SelectedBones.Select(bone => (bone.BoneName, bone.Position)).ToDictionary(t => t.BoneName, t => t.Position);
+			this.Skeleton.ClearSelection();
+
 			// Step 1: Import body part of the pose
 			if (importOption is PoseImportOptions.Character or PoseImportOptions.FullTransform or PoseImportOptions.BodyOnly)
 			{
@@ -450,13 +457,9 @@ public partial class PosePage : UserControl
 				}
 
 				// Store updated bone positions as they will get reset by the expression import
-				bonePositions = this.Skeleton.SelectedBones.Select(bone => (bone.BoneName, bone.Position)).ToDictionary(t => t.BoneName, t => t.Position);
+				bodyPositions = this.Skeleton.SelectedBones.Select(bone => (bone.BoneName, bone.Position)).ToDictionary(t => t.BoneName, t => t.Position);
 				this.Skeleton.ClearSelection();
 			}
-
-			// Body pose is loaded. Exit early if we're only importing the body.
-			if (importOption == PoseImportOptions.BodyOnly)
-				return;
 
 			// Step 2: Import the facial expression
 			if (!mismatchedFaceBones && (importOption is PoseImportOptions.Character or PoseImportOptions.FullTransform or PoseImportOptions.ExpressionOnly))
@@ -486,14 +489,27 @@ public partial class PosePage : UserControl
 				}
 			}
 
-			// Expression is loaded. Exit early if we're only importing expressions.
-			if (importOption == PoseImportOptions.ExpressionOnly)
+			// Step 3: Restore face bone positions if face bones were mismatched
+			if (mismatchedFaceBones)
+			{
+				foreach ((string name, Vector3 position) in facePositions)
+				{
+					BoneVisual3d? bone = this.Skeleton.GetBone(name);
+					if (bone == null)
+						continue;
+
+					bone.Position = position;
+					bone.WriteTransform(this.Skeleton, false);
+				}
+			}
+
+			if (importOption is PoseImportOptions.BodyOnly or PoseImportOptions.ExpressionOnly)
 				return;
 
-			// Step 3: Restore body bone positions
+			// Step 4: Restore body bone positions
 			if (importOption == PoseImportOptions.FullTransform && mode.HasFlag(PoseFile.Mode.Position))
 			{
-				foreach ((string name, Vector3 position) in bonePositions)
+				foreach ((string name, Vector3 position) in bodyPositions)
 				{
 					BoneVisual3d? bone = this.Skeleton.GetBone(name);
 
