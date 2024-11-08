@@ -20,7 +20,7 @@ public interface IAnimation
 		Blend,
 	}
 
-	public string? DisplayName { get; }
+	public string? Name { get; }
 	public ImageReference? Icon { get; }
 	public ActionTimeline? Timeline { get; }
 	public AnimationPurpose Purpose { get; }

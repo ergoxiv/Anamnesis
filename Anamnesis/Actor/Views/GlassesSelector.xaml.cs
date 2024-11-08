@@ -3,12 +3,11 @@
 
 namespace Anamnesis.Actor.Views;
 
-using System.Threading.Tasks;
-using Anamnesis.Actor.Utilities;
-using Anamnesis.GameData;
 using Anamnesis.GameData.Excel;
+using Anamnesis.GameData.Sheets;
 using Anamnesis.Services;
 using Anamnesis.Styles.Drawers;
+using System.Threading.Tasks;
 using XivToolsWpf;
 
 public abstract class GlassesSelectorDrawer : SelectorDrawer<Glasses>
@@ -29,7 +28,7 @@ public partial class GlassesSelector : GlassesSelectorDrawer
 	protected override Task LoadItems()
 	{
 		if (GameDataService.Glasses != null)
-			this.AddItems(GameDataService.Glasses);
+			this.AddItems(GameDataService.Glasses.ToEnumerable());
 
 		return Task.CompletedTask;
 	}
@@ -37,10 +36,10 @@ public partial class GlassesSelector : GlassesSelectorDrawer
 	protected override bool Filter(Glasses glasses, string[]? search)
 	{
 		// skip items without names
-		if (string.IsNullOrEmpty(glasses.Name))
+		if (string.IsNullOrEmpty(glasses.Name.ToString()))
 			return false;
 
-		if (!SearchUtility.Matches(glasses.Name, search))
+		if (!SearchUtility.Matches(glasses.Name.ToString(), search))
 			return false;
 
 		return true;
@@ -48,10 +47,10 @@ public partial class GlassesSelector : GlassesSelectorDrawer
 
 	protected override int Compare(Glasses glassesA, Glasses glassesB)
 	{
-		if (glassesA.GlassesId == 0 && glassesB.GlassesId != 0)
+		if (glassesA.RowId == 0 && glassesB.RowId != 0)
 			return -1;
 
-		if (glassesA.GlassesId != 0 && glassesB.GlassesId == 0)
+		if (glassesA.RowId != 0 && glassesB.RowId == 0)
 			return 1;
 
 		if (glassesA.IsFavorite && !glassesB.IsFavorite)

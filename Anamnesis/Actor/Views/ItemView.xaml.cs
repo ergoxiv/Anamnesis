@@ -3,14 +3,6 @@
 
 namespace Anamnesis.Actor.Views;
 
-using System;
-using System.ComponentModel;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
-using System.Windows.Media;
 using Anamnesis.Actor.Utilities;
 using Anamnesis.GameData;
 using Anamnesis.GameData.Excel;
@@ -20,6 +12,14 @@ using Anamnesis.Styles.Drawers;
 using Anamnesis.Utils;
 using PropertyChanged;
 using Serilog;
+using System;
+using System.ComponentModel;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using XivToolsWpf;
 using XivToolsWpf.DependencyProperties;
 
@@ -80,7 +80,7 @@ public partial class ItemView : UserControl
 		}
 		set
 		{
-			IItem? item = GameDataService.Items?.Get(value);
+			IItem? item = GameDataService.Items?.GetRow(value);
 			this.SetItem(item);
 		}
 	}
@@ -133,12 +133,12 @@ public partial class ItemView : UserControl
 
 			// Invalid if we're naked in some way other than Emperor's.
 			ushort[] invalidItems = { 0, 9901, 9903 };
-			if(invalidItems.Contains(this.Item.ModelBase))
+			if (invalidItems.Contains(this.Item.ModelBase))
 				return false;
 
 			// Invalid if row Id is 0, which would be the case if we have a
 			// set/subset combo which doesn't match an actual item.
-			if(this.Item.RowId == 0)
+			if (this.Item.RowId == 0)
 				return false;
 
 			// Most items will have the None category. Shop items will be premium, and old items will be deprecated.
@@ -161,7 +161,7 @@ public partial class ItemView : UserControl
 			if (this.Item == null)
 				return false;
 
-			if(this.Item.ModelBase == 0)
+			if (this.Item.ModelBase == 0)
 				return false;
 
 			return true;
@@ -315,7 +315,7 @@ public partial class ItemView : UserControl
 
 			if (autoOffhand && this.Slot == ItemSlots.MainHand
 				&& item is Item ivm
-				&& ivm.EquipSlot?.OffHand == -1)
+				&& ivm.EquipSlotCategory.Value.OffHand == -1)
 			{
 				if (ivm.HasSubModel)
 				{
@@ -432,8 +432,8 @@ public partial class ItemView : UserControl
 				if (valueVm is ItemMemory itemVm)
 				{
 					IItem? item = ItemUtility.GetItem(slots, 0, itemVm.Base, itemVm.Variant, this.Actor.IsChocobo);
-					IDye? dye = GameDataService.Dyes.Get(itemVm.Dye);
-					IDye? dye2 = GameDataService.Dyes.Get(itemVm.Dye2);
+					IDye? dye = GameDataService.Dyes.GetRow(itemVm.Dye);
+					IDye? dye2 = GameDataService.Dyes.GetRow(itemVm.Dye2);
 
 					await Dispatch.MainThread();
 
@@ -448,8 +448,8 @@ public partial class ItemView : UserControl
 					if (weaponVm.Set == 0)
 						weaponVm.Dye = 0;
 
-					IDye? dye = GameDataService.Dyes.Get(weaponVm.Dye);
-					IDye? dye2 = GameDataService.Dyes.Get(weaponVm.Dye2);
+					IDye? dye = GameDataService.Dyes.GetRow(weaponVm.Dye);
+					IDye? dye2 = GameDataService.Dyes.GetRow(weaponVm.Dye2);
 
 					await Dispatch.MainThread();
 

@@ -3,12 +3,12 @@
 
 namespace Anamnesis.GameData.Sheets;
 
-using System;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Anamnesis.Services;
 using Lumina.Data.Files;
 using Serilog;
+using System;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 public class ImageReference
 {

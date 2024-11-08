@@ -4,7 +4,6 @@
 namespace Lumina;
 using Anamnesis.Actor.Utilities;
 using Anamnesis.GameData;
-using Lumina.Excel.GeneratedSheets;
 using Serilog;
 
 public static class LuminaExtensions
@@ -67,7 +66,7 @@ public static class LuminaExtensions
 		}
 	}
 
-	public static bool Contains(this EquipSlotCategory self, ItemSlots slot)
+	public static bool Contains(this Lumina.Excel.Sheets.EquipSlotCategory self, ItemSlots slot)
 	{
 		switch (slot)
 		{
