@@ -3,6 +3,47 @@
 
 namespace Anamnesis.GameData.Sheets;
 
+using Lumina.Excel;
+
+public static class ExcelPageExtensions
+{
+	public static ushort ReadWeaponSet(this ExcelPage self, uint offset)
+	{
+		ulong val = self.ReadUInt64(offset);
+		return (ushort)val;
+	}
+
+	public static ushort ReadWeaponBase(this ExcelPage self, uint offset)
+	{
+		ulong val = self.ReadUInt64(offset);
+		return (ushort)(val >> 16);
+	}
+
+	public static ushort ReadWeaponVariant(this ExcelPage self, uint offset)
+	{
+		ulong val = self.ReadUInt64(offset);
+		return (ushort)(val >> 32);
+	}
+
+	public static ushort ReadSet(this ExcelPage self, uint offset)
+	{
+		return 0;
+	}
+
+	public static ushort ReadBase(this ExcelPage self, uint offset)
+	{
+		ulong val = self.ReadUInt64(offset);
+		return (ushort)val;
+	}
+
+	public static ushort ReadVariant(this ExcelPage self, uint offset)
+	{
+		ulong val = self.ReadUInt64(offset);
+		return (ushort)(val >> 16);
+	}
+}
+
+/*
 using System;
 using Anamnesis.Services;
 using Lumina.Excel;
@@ -50,41 +91,6 @@ public static class RowParserExtensions
 		return value.RawString;
 	}
 
-	public static ushort ReadWeaponSet(this RowParser self, int column)
-	{
-		ulong val = self.ReadColumn<ulong>(column);
-		return (ushort)val;
-	}
-
-	public static ushort ReadWeaponBase(this RowParser self, int column)
-	{
-		ulong val = self.ReadColumn<ulong>(column);
-		return (ushort)(val >> 16);
-	}
-
-	public static ushort ReadWeaponVariant(this RowParser self, int column)
-	{
-		ulong val = self.ReadColumn<ulong>(column);
-		return (ushort)(val >> 32);
-	}
-
-	public static ushort ReadSet(this RowParser self, int column)
-	{
-		return 0;
-	}
-
-	public static ushort ReadBase(this RowParser self, int column)
-	{
-		ulong val = self.ReadColumn<ulong>(column);
-		return (ushort)val;
-	}
-
-	public static ushort ReadVariant(this RowParser self, int column)
-	{
-		ulong val = self.ReadColumn<ulong>(column);
-		return (ushort)(val >> 16);
-	}
-
 	public static TRow? ReadRowReference<TColumn, TRow>(this RowParser self, int column, int minValue = int.MinValue)
 		where TRow : Lumina.Excel.ExcelRow
 	{
@@ -114,4 +120,4 @@ public static class RowParserExtensions
 
 		throw new Exception($"Unrecognized row reference key type: {typeof(TColumn)}");
 	}
-}
+} */

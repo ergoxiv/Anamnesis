@@ -16,7 +16,7 @@ public class GlassesMemory : MemoryBase, INotifyPropertyChanged
 
 	public void Equip(Glasses glasses)
 	{
-		this.GlassesId = glasses.GlassesId;
+		this.GlassesId = (ushort)glasses.RowId;
 	}
 
 	public bool Is(Glasses? glasses)
@@ -24,6 +24,6 @@ public class GlassesMemory : MemoryBase, INotifyPropertyChanged
 		if (glasses == null)
 			return false;
 
-		return this.GlassesId == glasses.GlassesId;
+		return this.GlassesId == (ushort)glasses.Value.RowId;
 	}
 }

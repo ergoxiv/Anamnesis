@@ -3,11 +3,11 @@
 
 namespace Anamnesis.GameData;
 
-using System.Text.Json.Serialization;
 using Anamnesis.GameData.Sheets;
 using Anamnesis.Serialization.Converters;
 using Anamnesis.Services;
 using Anamnesis.TexTools;
+using System.Text.Json.Serialization;
 
 public class Equipment : IItem
 {
@@ -35,7 +35,7 @@ public class Equipment : IItem
 	public string? Description { get; set; }
 	public string Id { get; set; } = string.Empty;
 	public FitsSlots Slot { get; set; } = FitsSlots.None;
-	public byte EquipLevel => 0;
+	public byte LevelEquip => 0;
 
 	[JsonIgnore] public ushort ModelBase => IItemConverter.SplitString(this.Id).modelBase;
 	[JsonIgnore] public ushort ModelVariant => IItemConverter.SplitString(this.Id).modelVariant;

@@ -11,7 +11,7 @@ public class InvisibleBodyItem : IItem
 {
 	public string Name => LocalizationService.GetString("Item_InvisibleBody");
 	public string Description => LocalizationService.GetString("Item_InvisibleBodyDesc");
-	public ImageReference? Icon => GameDataService.Items.Get(10033)?.Icon;
+	public ImageReference? Icon => GameDataService.Items.GetRow(10033).Icon;
 	public ushort ModelSet => 0;
 	public ushort ModelBase => 6121;
 	public ushort ModelVariant => 254;
@@ -23,7 +23,7 @@ public class InvisibleBodyItem : IItem
 	public bool IsWeapon => false;
 	public Mod? Mod => null;
 	public uint RowId => 0;
-	public byte EquipLevel => 0;
+	public byte LevelEquip => 0;
 
 	public bool IsFavorite
 	{

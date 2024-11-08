@@ -3,17 +3,16 @@
 
 namespace Anamnesis.Actor.Views;
 
-using System;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
 using Anamnesis.Actor.Utilities;
 using Anamnesis.GameData;
 using Anamnesis.GameData.Excel;
+using Anamnesis.GameData.Sheets;
 using Anamnesis.Keyboard;
 using Anamnesis.Services;
 using Anamnesis.Styles.Drawers;
-using PropertyChanged;
+using System;
+using System.Threading.Tasks;
+using System.Windows;
 using XivToolsWpf;
 
 public abstract class EquipmentSelectorDrawer : SelectorDrawer<IItem>
@@ -176,8 +175,8 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 			this.AddItem(ItemUtility.InvisibileHeadItem);
 
 			this.AddItems(GameDataService.Equipment);
-			this.AddItems(GameDataService.Items);
-			this.AddItems(GameDataService.Perform);
+			this.AddItems(GameDataService.Items.ToEnumerable());
+			this.AddItems(GameDataService.Perform.ToEnumerable());
 		}
 
 		return Task.CompletedTask;
@@ -211,7 +210,7 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 		{
 			case SortModes.Name: return itemA.Name.CompareTo(itemB.Name);
 			case SortModes.Row: return itemA.RowId.CompareTo(itemB.RowId);
-			case SortModes.Level: return itemA.EquipLevel.CompareTo(itemB.EquipLevel);
+			case SortModes.Level: return itemA.LevelEquip.CompareTo(itemB.LevelEquip);
 		}
 
 		throw new NotImplementedException($"Sort mode {this.SortMode} not implemented");
@@ -286,10 +285,10 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 
 	private bool CanEquip(Item item)
 	{
-		if (item.EquipRestriction == null || this.actor == null || this.actor.Customize == null)
+		if (this.actor == null || this.actor.Customize == null)
 			return true;
 
-		return item.EquipRestriction.CanEquip(this.actor.Customize.Race, this.actor.Customize.Gender);
+		return item.EquipRestriction.Value.CanEquip(this.actor.Customize.Race, this.actor.Customize.Gender);
 	}
 
 	private bool MatchesSearch(IItem item, string[]? search = null)

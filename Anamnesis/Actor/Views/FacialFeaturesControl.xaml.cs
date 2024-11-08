@@ -3,14 +3,14 @@
 
 namespace Anamnesis.Actor.Views;
 
-using System;
-using System.Collections.Generic;
-using System.Windows.Controls;
 using Anamnesis.GameData.Excel;
 using Anamnesis.GameData.Sheets;
 using Anamnesis.Memory;
 using Anamnesis.Services;
 using PropertyChanged;
+using System;
+using System.Collections.Generic;
+using System.Windows.Controls;
 using XivToolsWpf.DependencyProperties;
 
 /// <summary>
@@ -104,7 +104,7 @@ public partial class FacialFeaturesControl : UserControl
 		{
 			foreach (CharaMakeType set in GameDataService.CharacterMakeTypes)
 			{
-				if (set.Tribe != this.Tribe)
+				if (set.CustomizeTribe != this.Tribe)
 					continue;
 
 				if (set.Gender != this.Gender)

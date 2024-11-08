@@ -3,6 +3,13 @@
 
 namespace Anamnesis.Actor.Views;
 
+using Anamnesis.GameData;
+using Anamnesis.GameData.Excel;
+using Anamnesis.Memory;
+using Anamnesis.Services;
+using Anamnesis.Styles.Drawers;
+using PropertyChanged;
+using Serilog;
 using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
@@ -10,15 +17,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using Anamnesis.Actor.Utilities;
-using Anamnesis.GameData;
-using Anamnesis.GameData.Excel;
-using Anamnesis.GameData.Interfaces;
-using Anamnesis.Memory;
-using Anamnesis.Services;
-using Anamnesis.Styles.Drawers;
-using PropertyChanged;
-using Serilog;
 using XivToolsWpf;
 using XivToolsWpf.DependencyProperties;
 
@@ -74,11 +72,11 @@ public partial class GlassesItemView : UserControl
 
 		SelectorDrawer.Show<GlassesSelector, Glasses>(this.Glasses, (pickedGlasses) =>
 		{
-			if (this.GlassesModel == null || pickedGlasses == null)
+			if (this.GlassesModel == null)
 				return;
 
 			this.Glasses = pickedGlasses;
-			this.GlassesModel.GlassesId = pickedGlasses.GlassesId;
+			this.GlassesModel.GlassesId = (ushort)pickedGlasses.RowId;
 		});
 	}
 
@@ -117,7 +115,7 @@ public partial class GlassesItemView : UserControl
 
 				await Dispatch.MainThread();
 
-				this.Glasses = GameDataService.Glasses.Get(valueVm.GlassesId);
+				this.Glasses = GameDataService.Glasses.GetRow(valueVm.GlassesId);
 			}
 			catch (Exception ex)
 			{

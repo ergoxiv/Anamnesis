@@ -31,16 +31,16 @@ public partial class DeveloperTab : UserControl
 	public GposeService GposeService => GposeService.Instance;
 	public SceneOptionsValues SceneOptions { get; init; } = new();
 
-	private void OnNpcNameSearchClicked(object sender, RoutedEventArgs e)
+	/* private void OnNpcNameSearchClicked(object sender, RoutedEventArgs e)
 	{
-		GenericSelectorUtil.Show(GameDataService.BattleNpcNames, (v) =>
+		GenericSelectorUtil.Show(GameDataService.BattleNpcNames.ToEnumerable(), (v) =>
 		{
-			if (v.Description == null)
-				return;
-
-			ClipboardUtility.CopyToClipboard(v.Description);
+			if (v is BattleNpcName battleNpcName && battleNpcName.Description != null)
+			{
+				ClipboardUtility.CopyToClipboard(battleNpcName.Description);
+			}
 		});
-	}
+	} */
 
 	private void OnFindNpcClicked(object sender, RoutedEventArgs e)
 	{
