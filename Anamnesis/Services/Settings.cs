@@ -3,6 +3,8 @@
 
 namespace Anamnesis.Services;
 
+using Anamnesis.Keyboard;
+using PropertyChanged;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -10,13 +12,13 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
-using Anamnesis.Keyboard;
-using PropertyChanged;
 
 [Serializable]
 [AddINotifyPropertyChangedInterface]
 public class Settings : INotifyPropertyChanged
 {
+	private int autoSaveInterval = 10000;
+
 	public event PropertyChangedEventHandler? PropertyChanged;
 
 	public enum Fonts
@@ -38,6 +40,7 @@ public class Settings : INotifyPropertyChanged
 	public string DefaultCharacterDirectory { get; set; } = "%MyDocuments%/Anamnesis/Characters/";
 	public string DefaultCameraShotDirectory { get; set; } = "%MyDocuments%/Anamnesis/CameraShots/";
 	public string DefaultSceneDirectory { get; set; } = "%MyDocuments%/Anamnesis/Scenes/";
+	public string DefaultAutoSaveDirectory { get; set; } = "%MyDocuments%/Anamnesis/AutoSave/";
 	public bool ShowAdvancedOptions { get; set; } = true;
 	public bool FlipPoseGuiSides { get; set; } = false;
 	public Fonts Font { get; set; } = Fonts.Default;
@@ -63,6 +66,26 @@ public class Settings : INotifyPropertyChanged
 	public Binds KeyboardBindings { get; set; } = new();
 	public Dictionary<string, int> ActorTabOrder { get; set; } = new();
 	public Dictionary<string, bool> PosingBoneLinks { get; set; } = new();
+	public int MaxAutoSaveCount { get; set; } = 12;
+	public int AutoSaveInterval
+	{
+		get
+		{
+			return this.autoSaveInterval;
+		}
+		set
+		{
+			if (value == this.autoSaveInterval)
+				return;
+
+			// Limit the minimum value to 1000ms
+			if (value < 1000)
+				value = 1000;
+
+			this.autoSaveInterval = value;
+			AutoSaveService.Instance?.RestartUpdateTask();
+		}
+	}
 
 	public double WindowOpcaticy
 	{
