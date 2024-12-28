@@ -24,7 +24,7 @@ using XivToolsWpf.Math3D.Extensions;
 using AnQuaternion = System.Numerics.Quaternion;
 
 [AddINotifyPropertyChangedInterface]
-public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
+public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged, IDisposable
 {
 	public readonly Dictionary<string, BoneVisual3d> Bones = new();
 	public readonly List<BoneVisual3d> SelectedBones = new();
@@ -195,6 +195,11 @@ public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 		this.ClearSelection();
 		this.ClearBones();
 		this.Children.Clear();
+	}
+
+	public void Dispose()
+	{
+		this.Clear();
 	}
 
 	public void Select(IBone bone)
@@ -575,88 +580,63 @@ public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 		if (actor.ModelObject?.Transform != null)
 			actor.ModelObject.Transform.PropertyChanged += this.OnTransformPropertyChanged;
 
+		if (!GposeService.Instance.IsGpose || this.Actor?.ModelObject?.Skeleton == null)
+			return;
+
 		this.Clear();
 
 		await Dispatch.MainThread();
 
-		this.ClearSelection();
+		// Get all bones
+		this.AddBones(this.Actor.ModelObject.Skeleton);
 
-		try
+		if (this.Actor.MainHand?.Model?.Skeleton != null)
+			this.AddBones(this.Actor.MainHand.Model.Skeleton, "mh_");
+
+		if (this.Actor.OffHand?.Model?.Skeleton != null)
+			this.AddBones(this.Actor.OffHand.Model.Skeleton, "oh_");
+
+		// Create Bone links from the link database
+		foreach ((string name, BoneVisual3d bone) in this.Bones)
 		{
-			await Dispatch.MainThread();
-
-			if (!GposeService.Instance.IsGpose)
-				return;
-
-			this.ClearBones();
-			this.Children.Clear();
-
-			if (this.Actor?.ModelObject?.Skeleton == null)
-				return;
-
-			// Get all bones
-			this.AddBones(this.Actor.ModelObject.Skeleton);
-
-			if (this.Actor.MainHand?.Model?.Skeleton != null)
-				this.AddBones(this.Actor.MainHand.Model.Skeleton, "mh_");
-
-			if (this.Actor.OffHand?.Model?.Skeleton != null)
-				this.AddBones(this.Actor.OffHand.Model.Skeleton, "oh_");
-
-			// Create Bone links from the link database
-			foreach ((string name, BoneVisual3d bone) in this.Bones)
+			foreach (LinkedBones.LinkSet links in LinkedBones.Links)
 			{
-				foreach (LinkedBones.LinkSet links in LinkedBones.Links)
+				if (links.Tribe != null && this.Actor?.Customize?.Tribe != links.Tribe)
+					continue;
+
+				if (links.Gender != null && this.Actor?.Customize?.Gender != links.Gender)
+					continue;
+
+				if (!links.Contains(name))
+					continue;
+
+				foreach (string linkedBoneName in links.Bones)
 				{
-					if (links.Tribe != null && this.Actor?.Customize?.Tribe != links.Tribe)
+					if (linkedBoneName == name)
 						continue;
 
-					if (links.Gender != null && this.Actor?.Customize?.Gender != links.Gender)
+					BoneVisual3d? linkedBone = this.GetBone(linkedBoneName);
+
+					if (linkedBone == null)
 						continue;
 
-					if (!links.Contains(name))
-						continue;
-
-					foreach (string linkedBoneName in links.Bones)
-					{
-						if (linkedBoneName == name)
-							continue;
-
-						BoneVisual3d? linkedBone = this.GetBone(linkedBoneName);
-
-						if (linkedBone == null)
-							continue;
-
-						bone.LinkedBones.Add(linkedBone);
-					}
+					bone.LinkedBones.Add(linkedBone);
 				}
 			}
-
-			// Read the initial transforms of all bones.
-			foreach ((string name, BoneVisual3d bone) in this.Bones)
-			{
-				bone.ReadTransform();
-			}
-
-			// Check for ivcs bones
-			this.IsIVCS = false;
-			foreach ((string name, BoneVisual3d bone) in this.Bones)
-			{
-				if (name.StartsWith("iv_"))
-				{
-					this.IsIVCS = true;
-					break;
-				}
-			}
-
-			// Notify that the skeleton has changed.
-			// All properties that depend on the skeleton are prompted to update.
-			this.RaisePropertyChanged(string.Empty);
 		}
-		catch (Exception)
+
+		// Read the initial transforms of all bones.
+		foreach ((string name, BoneVisual3d bone) in this.Bones)
 		{
-			throw;
+			bone.ReadTransform();
 		}
+
+		// Check for IVCS bones
+		this.IsIVCS = this.Bones.Keys.Any(name => name.StartsWith("iv_"));
+
+		// Notify that the skeleton has changed.
+		// All properties that depend on the skeleton are prompted to update.
+		this.RaisePropertyChanged(string.Empty);
 	}
 
 	public void WriteSkeleton()

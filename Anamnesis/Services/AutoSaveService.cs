@@ -9,6 +9,7 @@ using Anamnesis.Services;
 using PropertyChanged;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -108,7 +109,7 @@ public class AutoSaveService : ServiceBase<AutoSaveService>
 		if (!Directory.Exists(charDirPath))
 			Directory.CreateDirectory(charDirPath);
 
-		foreach (var pinnedActor in TargetService.Instance.PinnedActors)
+		foreach (var pinnedActor in TargetService.Instance.PinnedActors.ToList())
 		{
 			var actor = pinnedActor.Memory;
 			if (actor == null)
@@ -156,31 +157,38 @@ public class AutoSaveService : ServiceBase<AutoSaveService>
 			if (!Directory.Exists(posesDir))
 				Directory.CreateDirectory(posesDir);
 
-			foreach (var pinnedActor in TargetService.Instance.PinnedActors)
+			// Start measuring time
+			Stopwatch stopwatch = Stopwatch.StartNew();
+
+			await Dispatch.MainThread();
+
+			foreach (var pinnedActor in TargetService.Instance.PinnedActors.ToList())
 			{
 				var actor = pinnedActor.Memory;
 				if (actor == null)
 					continue;
 
-				SkeletonVisual3d skeleton;
-				{
-					await Dispatch.MainThread();
-					skeleton = new();
-					await skeleton.SetActor(actor);
-				}
+				SkeletonVisual3d skeleton = new();
+				await skeleton.SetActor(actor);
 
 				PoseFile file = new();
 				string fullFilePath = Path.Combine(posesDir, $"{actor.Name}{file.FileExtension}");
 				if (fullFilePath.Any(c => invalidPathChars.Contains(c)))
 				{
 					Log.Error($"Invalid pose file path: {fullFilePath}");
+					skeleton.Dispose();
 					break;
 				}
 
 				file.WriteToFile(actor, skeleton, null);
 				using FileStream stream = new(fullFilePath, FileMode.Create);
 				file.Serialize(stream);
+				skeleton.Dispose();
 			}
+
+			// Stop measuring time
+			stopwatch.Stop();
+			Log.Verbose($"Execution time for saving pose file: {stopwatch.ElapsedMilliseconds} ms");
 		}
 	}
 }

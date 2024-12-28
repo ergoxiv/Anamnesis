@@ -12,6 +12,7 @@ using PropertyChanged;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Threading;
 using System.Windows.Media.Media3D;
 using XivToolsWpf.Math3D;
 using XivToolsWpf.Math3D.Extensions;
@@ -27,7 +28,7 @@ public class BoneVisual3d : ModelVisual3D, ITransform, IBone, IDisposable
 	private const float EqualityTolerance = 0.00001f;
 	private static bool scaleLinked = true;
 
-	private readonly object transformLock = new();
+	private readonly ReaderWriterLockSlim transformLock = new();
 	private readonly QuaternionRotation3D rotation;
 	private readonly TranslateTransform3D position;
 	private BoneTargetVisual3d? targetVisual;
@@ -239,7 +240,8 @@ public class BoneVisual3d : ModelVisual3D, ITransform, IBone, IDisposable
 		if (!this.IsEnabled)
 			return;
 
-		lock (this.transformLock)
+		this.transformLock.EnterReadLock();
+		try
 		{
 			Transform newTransform;
 
@@ -323,6 +325,10 @@ public class BoneVisual3d : ModelVisual3D, ITransform, IBone, IDisposable
 				}
 			}
 		}
+		finally
+		{
+			this.transformLock.ExitReadLock();
+		}
 	}
 
 	public virtual void WriteTransform(ModelVisual3D root, bool writeChildren = true, bool writeLinked = true)
@@ -330,7 +336,8 @@ public class BoneVisual3d : ModelVisual3D, ITransform, IBone, IDisposable
 		if (!this.IsEnabled)
 			return;
 
-		lock (this.transformLock)
+		this.transformLock.EnterWriteLock();
+		try
 		{
 			foreach (TransformMemory transformMemory in this.TransformMemories)
 			{
@@ -422,6 +429,10 @@ public class BoneVisual3d : ModelVisual3D, ITransform, IBone, IDisposable
 			{
 				transformMemory.EnableReading = true;
 			}
+		}
+		finally
+		{
+			this.transformLock.ExitWriteLock();
 		}
 	}
 
