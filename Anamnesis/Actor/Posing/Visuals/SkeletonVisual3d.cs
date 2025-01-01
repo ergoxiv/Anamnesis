@@ -27,6 +27,8 @@ using AnQuaternion = System.Numerics.Quaternion;
 public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 {
 	public readonly Dictionary<string, BoneVisual3d> Bones = new();
+
+	// Selected and Hovered bones are exclusive to the visual class.
 	public readonly List<BoneVisual3d> SelectedBones = new();
 	public readonly HashSet<BoneVisual3d> HoverBones = new();
 
@@ -64,13 +66,18 @@ public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 	}
 
 	public ActorMemory? Actor { get; private set; }
+
+	// Exclusive to the visual class.
 	public int SelectedCount => this.SelectedBones.Count;
+
+	// Exclusive to the visual class. Should be updated to support multiple bone posing.
 	public bool CanEditBone => this.SelectedBones.Count == 1;
 	public bool HasSelection => this.SelectedBones.Count > 0;
 	public bool HasHover => this.HoverBones.Count > 0;
 	public bool HasEquipmentBones => this.metBones.Count > 0 || this.topBones.Count > 0;
 	public bool HasWeaponBones => this.mainHandBones.Count > 0 || this.offHandBones.Count > 0;
 
+	// TODO: These are probably used in some XAML bindings.
 	public IEnumerable<BoneVisual3d> AllBones => this.Bones.Values;
 	public IEnumerable<BoneVisual3d> HairBones => this.hairBones;
 	public IEnumerable<BoneVisual3d> MetBones => this.metBones;
@@ -78,8 +85,10 @@ public class SkeletonVisual3d : ModelVisual3D, INotifyPropertyChanged
 	public IEnumerable<BoneVisual3d> MainHandBones => this.mainHandBones;
 	public IEnumerable<BoneVisual3d> OffHandBones => this.offHandBones;
 
+	// TODO: Used in 3D view to search for bones.
 	public string BoneSearch { get; set; } = string.Empty;
 
+	// TODO: Used in 3D view to search for bones.
 	public IEnumerable<BoneVisual3d> BoneSearchResult => string.IsNullOrWhiteSpace(this.BoneSearch) ? this.AllBones : this.AllBones.Where(b => FileSystemName.MatchesSimpleExpression($"*{this.BoneSearch}*", b.BoneName) || FileSystemName.MatchesSimpleExpression($"*{this.BoneSearch}*", b.Tooltip));
 
 	public bool FlipSides

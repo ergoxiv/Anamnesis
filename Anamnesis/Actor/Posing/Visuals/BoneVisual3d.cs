@@ -193,6 +193,7 @@ public class BoneVisual3d : ModelVisual3D, ITransform, IBone, IDisposable
 		}
 	}
 
+	// TODO: Determine if this is needed
 	public CmQuaternion RootRotation
 	{
 		get
