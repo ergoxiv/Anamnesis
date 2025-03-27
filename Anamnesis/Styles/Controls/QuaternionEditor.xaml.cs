@@ -44,6 +44,9 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 
 	private CmQuaternion worldSpaceDelta;
 	private bool worldSpace;
+	private readonly Sphere pivotSphere;
+	private readonly Line axisProjectionLine;
+	private readonly Line planeNormalLine;
 
 	public QuaternionEditor()
 	{
@@ -74,7 +77,34 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 		this.rotationGizmo = new RotationGizmo(this);
 		this.Viewport.Children.Add(this.rotationGizmo);
 
-		this.Viewport.Camera = new PerspectiveCamera(new Point3D(0, 0, -2.0), new Vector3D(0, 0, 1), new Vector3D(0, 1, 0), 45);
+		// Create and add the pivot sphere directly to the viewport
+		this.pivotSphere = new Sphere
+		{
+			Radius = 0.03,
+			Material = new DiffuseMaterial(new SolidColorBrush(Colors.Yellow)),
+		};
+
+		// Create lines for initial and current orientations
+		this.axisProjectionLine = new Line
+		{
+			Thickness = 2,
+			Color = Colors.Red,
+		};
+		this.Viewport.Children.Add(this.axisProjectionLine);
+
+		this.planeNormalLine = new Line
+		{
+			Thickness = 2,
+			Color = Colors.Green,
+		};
+		this.Viewport.Children.Add(this.planeNormalLine);
+
+		// Add a light source to the scene
+		this.Viewport.Children.Add(new ModelVisual3D() { Content = new AmbientLight(Colors.White) });
+
+		PerspectiveCamera camera = new PerspectiveCamera(new Point3D(0, 0, -2.0), new Vector3D(0, 0, 1), new Vector3D(0, 1, 0), 45);
+		camera.FarPlaneDistance = 1000;
+		this.Viewport.Camera = camera;
 
 		this.worldSpace = false;
 
@@ -266,7 +296,38 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 
 	private void OnViewportMouseDown(object sender, MouseButtonEventArgs e)
 	{
-		Mouse.Capture(this.Viewport);
+		Mouse.Capture(this.Viewport, CaptureMode.SubTree);
+
+		if (e.LeftButton == MouseButtonState.Pressed)
+		{
+			Point mousePos = e.GetPosition(this.Viewport);
+
+			var activeAxis = this.rotationGizmo.Active;
+			if (activeAxis == null)
+				return;
+
+			// Find the nearest point on the active Axis gizmo circle
+			Point3D? nearestPoint = activeAxis.NearestPoint2D(mousePos);
+			if (nearestPoint == null)
+				return;
+
+			// Transform the nearest point from the Axis gizmo's space to the quaternion editor's transform space
+			// Point3D transformedPoint = this.rotationGizmo.Transform.Transform((Point3D)nearestPoint);
+			Point3D transformedPoint = GetWorldMatrixFor(activeAxis).Transform((Point3D)nearestPoint);
+
+			// Set the pivot point for the active axis gizmo
+			// Point3D pivotPoint = activeAxis.TransformToAncestor(this.rotationGizmo).Transform((Point3D)nearestPoint);
+			activeAxis.SetPivotPoint(transformedPoint);
+
+			// Set the pivotSphere's transform to align with the transformed point
+			this.pivotSphere.Transform = new TranslateTransform3D(transformedPoint.X, transformedPoint.Y, transformedPoint.Z);
+			// this.pivotSphere.Transform = new TranslateTransform3D(pivotPoint.X, pivotPoint.Y, pivotPoint.Z);
+			this.pivotSphere.Material = new DiffuseMaterial(new SolidColorBrush(!activeAxis.Locked ? Colors.Yellow : Colors.White));
+
+			if (this.Viewport.Children.Contains(this.pivotSphere))
+				this.Viewport.Children.Remove(this.pivotSphere);
+			this.Viewport.Children.Add(this.pivotSphere);
+		}
 	}
 
 	private void OnViewportMouseUp(object sender, MouseButtonEventArgs e)
@@ -280,6 +341,7 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 			this.LockedAxisDisplay.Text = GetAxisName(this.rotationGizmo.Locked?.Axis);
 		}
 
+		this.Viewport.Children.Remove(this.pivotSphere);
 		this.rotationGizmo.Hover(null);
 	}
 
@@ -405,9 +467,9 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 			};
 			this.Children.Add(sphere);
 
-			this.Children.Add(new AxisGizmo((Color)ColorConverter.ConvertFromString("#1c59ff"), new CmVector(1, 0, 0)));
-			this.Children.Add(new AxisGizmo((Color)ColorConverter.ConvertFromString("#94e800"), new CmVector(0, 1, 0)));
-			this.Children.Add(new AxisGizmo((Color)ColorConverter.ConvertFromString("#ff0d3e"), new CmVector(0, 0, 1)));
+			this.Children.Add(new AxisGizmo(this, target, (Color)ColorConverter.ConvertFromString("#1c59ff"), new CmVector(1, 0, 0)));
+			this.Children.Add(new AxisGizmo(this, target, (Color)ColorConverter.ConvertFromString("#94e800"), new CmVector(0, 1, 0)));
+			this.Children.Add(new AxisGizmo(this, target, (Color)ColorConverter.ConvertFromString("#ff0d3e"), new CmVector(0, 0, 1)));
 		}
 
 		public AxisGizmo? Locked
@@ -508,9 +570,7 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 		{
 			CmQuaternion angle = QuaternionExtensions.FromEuler(angleEuler);
 			CmQuaternion targetQuat = this.target.ValueQuat * angle;
-			CmQuaternion interpolatedQuat = CmQuaternion.Slerp(this.target.ValueQuat, targetQuat, 0.6f);
-
-			this.target.ValueQuat = interpolatedQuat;
+			this.target.ValueQuat = CmQuaternion.Slerp(this.target.ValueQuat, targetQuat, 0.6f);
 		}
 	}
 
@@ -521,14 +581,29 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 		private readonly Cylinder cylinder;
 		private Color color;
 
+		private readonly RotationGizmo rotationGizmo;
+		private readonly QuaternionEditor target;
 		private Point3D? lastPoint;
+		private Point3D pivotPoint;
+		private Vector3D planeNormal;
+		private Vector3D dragTangent;
+		private bool locked = false;
 
-		public AxisGizmo(Color color, CmVector axis)
+		// TODO: Temp. Delete later
+		private readonly PlaneVisual3D planeVisual;
+
+		public AxisGizmo(RotationGizmo rotationGizmo, QuaternionEditor target, Color color, CmVector axis)
 		{
+			this.rotationGizmo = rotationGizmo;
+			this.target = target;
 			this.Axis = axis;
 			this.color = color;
 
 			var rotationAxis = new Vector3D(axis.Z, 0, axis.X);
+
+			// Create a plane visual for the gizmo
+			this.planeVisual = new PlaneVisual3D();
+			this.Children.Add(this.planeVisual);
 
 			this.circle = new Circle
 			{
@@ -570,6 +645,7 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 
 		public bool Locked
 		{
+			get => this.locked;
 			set
 			{
 				if (!value)
@@ -583,7 +659,58 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 					this.circle.Color = Colors.White;
 					this.circle.Thickness = 3;
 				}
+
+				this.locked = value;
 			}
+		}
+
+		public Point3D? NearestPoint2D(Point mousePosition)
+		{
+			Point3D? nearestPoint = this.circle.NearestPoint2D(new Point3D(mousePosition.X, mousePosition.Y, 0));
+			if (nearestPoint == null)
+				return null;
+
+			return this.circle.TransformToAncestor(this).Transform((Point3D)nearestPoint);
+		}
+
+		public void SetPivotPoint(Point3D point)
+		{
+			// Pivot point
+			this.pivotPoint = point;
+
+			// Plane normal (From the center of the gizmo pointing outwards, passing through the pivot point)
+			Matrix3D worldMatrix = GetWorldMatrixFor(this.rotationGizmo);
+			Point3D gizmoCenter = worldMatrix.Transform(new Point3D(0, 0, 0));
+			Vector3D centerToPivot = this.pivotPoint - gizmoCenter;
+
+			// If the vector is too small, use a fallback
+			if (centerToPivot.LengthSquared < 1e-6)
+			{
+				// Use camera direction as fallback
+				var camera = (PerspectiveCamera)this.target.Viewport.Camera;
+				this.planeNormal = camera.LookDirection;
+			}
+			else
+			{
+				this.planeNormal = centerToPivot;
+			}
+			this.planeNormal.Normalize();
+
+			// Tangent direction
+			Vector3D axisInWorld = worldMatrix.Transform(this.Axis.ToMedia3DVector());
+			axisInWorld.Normalize();
+			this.dragTangent = Vector3D.CrossProduct(axisInWorld, this.planeNormal);
+			if (this.dragTangent.LengthSquared < 1e-6)
+			{
+				// Fallback if the cross is degenerate
+				axisInWorld = worldMatrix.Transform(new Vector3D(0, 1, 0));
+				this.dragTangent = Vector3D.CrossProduct(axisInWorld, this.planeNormal);
+			}
+			this.dragTangent.Normalize();
+
+			// Visuals (for debugging purposes)
+			this.target.axisProjectionLine.Points = [this.pivotPoint, this.pivotPoint + axisInWorld];
+			this.target.planeNormalLine.Points = [gizmoCenter, gizmoCenter + this.planeNormal];
 		}
 
 		public CmVector Drag(Point3D mousePosition)
@@ -602,66 +729,206 @@ public partial class QuaternionEditor : UserControl, INotifyPropertyChanged
 					this.lastPoint = point;
 					return default;
 				}
-				else
-				{
-					Vector3D axis = new(0, 1, 0);
 
-					Vector3D from = (Vector3D)this.lastPoint;
-					Vector3D to = (Vector3D)point;
+				Vector3D axis = new(0, 1, 0);
 
-					this.lastPoint = null;
+				Vector3D from = (Vector3D)this.lastPoint;
+				Vector3D to = (Vector3D)point;
 
-					double angle = Vector3D.AngleBetween(from, to);
+				this.lastPoint = null;
 
-					Vector3D cross = Vector3D.CrossProduct(from, to);
-					if (Vector3D.DotProduct(axis, cross) < 0)
-						angle = -angle;
+				double angle = Vector3D.AngleBetween(from, to);
 
-					// X rotation gizmo is always backwards...
-					if (this.Axis.X >= 1)
-						angle = -angle;
+				Vector3D cross = Vector3D.CrossProduct(from, to);
+				if (Vector3D.DotProduct(axis, cross) < 0)
+					angle = -angle;
 
-					float speed = 2;
+				// X rotation gizmo is always backwards...
+				if (this.Axis.X >= 1)
+					angle = -angle;
 
-					if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift))
-						speed = 4;
+				float speed = 2;
 
-					if (Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl))
-						speed = 0.5f;
+				if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift))
+					speed = 4;
 
-					return CmVector.Multiply(this.Axis, (float)(angle * speed));
-				}
+				if (Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl))
+					speed = 0.5f;
+
+				return CmVector.Multiply(this.Axis, (float)(angle * speed));
 			}
-			else
+			else // Linear drag
 			{
 				if (this.lastPoint == null)
 				{
 					this.lastPoint = mousePosition;
 					return default;
 				}
-				else
-				{
-					Vector3D delta = (Point3D)this.lastPoint - mousePosition;
-					this.lastPoint = mousePosition;
 
-					float speed = 0.5f;
+				Point3D? prevIntersection = this.RaycastOnPlane(
+					new Point(this.lastPoint.Value.X, this.lastPoint.Value.Y),
+					this.pivotPoint,
+					this.planeNormal);
 
-					if (Keyboard.IsKeyDown(Key.LeftShift))
-						speed = 2;
+				Point3D? currentIntersection = this.RaycastOnPlane(
+					new Point(mousePosition.X, mousePosition.Y),
+					this.pivotPoint,
+					this.planeNormal);
 
-					if (Keyboard.IsKeyDown(Key.LeftCtrl))
-						speed = 0.25f;
+				if (prevIntersection == null || currentIntersection == null)
+					return default;
 
-					double distPos = Math.Max(delta.X, delta.Y);
-					double distNeg = Math.Min(delta.X, delta.Y);
+				Vector3D movement = (Vector3D)(currentIntersection - prevIntersection);
+				this.lastPoint = mousePosition;
 
-					double dist = distNeg;
-					if (Math.Abs(distPos) > Math.Abs(distNeg))
-						dist = distPos;
+				double distanceAlongTangent = Vector3D.DotProduct(movement, this.dragTangent);
 
-					return CmVector.Multiply(this.Axis, (float)(-dist * speed));
-				}
+				// Apply modifiers
+				float baseSensitivity = 100.0f;
+				float keyModifier = 1.0f;
+				if (Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift))
+					keyModifier = 4.0f;
+				else if (Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl))
+					keyModifier = 0.25f;
+
+				float rotationDegrees = (float)(distanceAlongTangent * baseSensitivity * keyModifier);
+				return CmVector.Multiply(this.Axis, rotationDegrees);
 			}
 		}
+
+		private Point3D? RaycastOnPlane(Point screenPos, Point3D pivotPoint, Vector3D planeNormal)
+		{
+			// Get camera and viewport dimensions
+			var camera = (PerspectiveCamera)this.target.Viewport.Camera;
+			double w = this.target.Viewport.ActualWidth;
+			double h = this.target.Viewport.ActualHeight;
+
+			// Convert screenPos to normalized device coords
+			double vx = (screenPos.X / w * 2.0) - 1.0;
+			double vy = 1.0 - (screenPos.Y / h * 2.0);
+
+			// Unproject the viewport coordinates to world coordinates
+			Point3D nearPoint = this.Unproject(new Point3D(vx, vy, 0), camera, w, h);
+			Point3D farPoint = this.Unproject(new Point3D(vx, vy, 1), camera, w, h);
+
+			// Create a ray from the camera position through the unprojected world point
+			Vector3D rayDirection = farPoint - nearPoint;
+			rayDirection.Normalize();
+
+			// Plane intersection
+			double denom = Vector3D.DotProduct(planeNormal, rayDirection);
+			if (Math.Abs(denom) < 1e-6)
+				return null; // Ray is parallel
+
+			double t = Vector3D.DotProduct(planeNormal, pivotPoint - nearPoint) / denom;
+			if (t < 0)
+				return null; // Intersection behind camera
+
+			return nearPoint + (rayDirection * t);
+		}
+
+		private double ProjectMovementOnDirection(Point previousScreenPos, Point currentScreenPos, Vector3D direction)
+		{
+			// Get camera and viewport dimensions
+			PerspectiveCamera camera = (PerspectiveCamera)this.target.Viewport.Camera;
+			double w = this.target.Viewport.ActualWidth;
+			double h = this.target.Viewport.ActualHeight;
+
+			// Convert screen positions to normalized device coords (NDC)
+			Point3D prevNdc = new(
+				(previousScreenPos.X / w * 2.0) - 1.0,
+				1.0 - (previousScreenPos.Y / h * 2.0),
+				0);
+			Point3D currNdc = new(
+				(currentScreenPos.X / w * 2.0) - 1.0,
+				1.0 - (currentScreenPos.Y / h * 2.0),
+				0);
+
+			// Unproject both points into 3D
+			Point3D prev3D = this.Unproject(prevNdc, camera, w, h);
+			Point3D curr3D = this.Unproject(currNdc, camera, w, h);
+
+			// Find the movement vector and take the dot product with the (normalized) direction
+			direction.Normalize();
+			Vector3D movement = curr3D - prev3D;
+			return Vector3D.DotProduct(movement, direction);
+		}
+
+		private Point3D Unproject(Point3D point, PerspectiveCamera camera, double viewportWidth, double viewportHeight)
+		{
+			Matrix3D viewMatrix = MathUtils.GetViewMatrix(camera);
+			Matrix3D projectionMatrix = MathUtils.GetProjectionMatrix(camera, viewportWidth / viewportHeight);
+			Matrix3D viewProjectionMatrix = viewMatrix * projectionMatrix;
+
+			if (!viewProjectionMatrix.HasInverse)
+				return new Point3D(double.NaN, double.NaN, double.NaN);
+
+			viewProjectionMatrix.Invert();
+
+			Point3D unprojectedPoint = viewProjectionMatrix.Transform(point);
+			return unprojectedPoint;
+		}
+	}
+
+	public static Matrix3D GetWorldMatrixFor(Visual3D? visual)
+	{
+		Matrix3D worldMatrix = Matrix3D.Identity;
+
+		// Traverse up the visual tree to accumulate transformations
+		while (visual != null)
+		{
+			if (visual.Transform != null)
+				worldMatrix.Append(visual.Transform.Value);
+
+			visual = VisualTreeHelper.GetParent(visual) as Visual3D;
+		}
+
+		return worldMatrix;
+	}
+}
+
+public class PlaneVisual3D : ModelVisual3D
+{
+	private readonly MeshGeometry3D mesh;
+	private readonly GeometryModel3D model;
+
+	public PlaneVisual3D()
+	{
+		this.mesh = new MeshGeometry3D();
+		this.model = new GeometryModel3D
+		{
+			Geometry = this.mesh,
+			Material = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(128, 255, 255, 255))),
+			BackMaterial = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(128, 255, 255, 255))),
+		};
+
+		this.Content = this.model;
+	}
+
+	public void UpdatePlane(Point3D point, Vector3D normal)
+	{
+		// Create a plane with a size of 1x1 units
+		double size = 1.0;
+
+		// Calculate the plane's basis vectors
+		Vector3D u = Vector3D.CrossProduct(new Vector3D(0, 1, 0), normal);
+		if (u.LengthSquared < 1e-6)
+		{
+			u = Vector3D.CrossProduct(new Vector3D(1, 0, 0), normal);
+		}
+		u.Normalize();
+		Vector3D v = Vector3D.CrossProduct(normal, u);
+		v.Normalize();
+
+		// Calculate the plane's corners
+		Point3D p0 = point + ((-u - v) * size);
+		Point3D p1 = point + ((u - v) * size);
+		Point3D p2 = point + ((u + v) * size);
+		Point3D p3 = point + ((-u + v) * size);
+
+		// Update the mesh
+		this.mesh.Positions = [p0, p1, p2, p3];
+		this.mesh.TriangleIndices = [0, 1, 2, 0, 2, 3];
+		this.mesh.Normals = [normal, normal, normal, normal];
 	}
 }
