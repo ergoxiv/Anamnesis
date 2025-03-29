@@ -105,7 +105,7 @@ public partial class FacialFeaturesControl : UserControl
 		{
 			foreach (CharaMakeType set in GameDataService.CharacterMakeTypes)
 			{
-				if (set.Tribe != this.Tribe)
+				if (set.CustomizeTribe != this.Tribe)
 					continue;
 
 				if (set.Gender != this.Gender)

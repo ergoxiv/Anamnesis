@@ -81,7 +81,7 @@ public partial class ItemView : UserControl
 		}
 		set
 		{
-			IItem? item = GameDataService.Items?.Get(value);
+			IItem? item = GameDataService.Items?.GetRow(value);
 			this.SetItem(item);
 		}
 	}
@@ -316,7 +316,7 @@ public partial class ItemView : UserControl
 
 			if (autoOffhand && this.Slot == ItemSlots.MainHand
 				&& item is Item ivm
-				&& ivm.EquipSlot?.OffHand == -1)
+				&& ivm.EquipSlotCategory.Value.OffHand == -1)
 			{
 				if (ivm.HasSubModel)
 				{
@@ -433,8 +433,8 @@ public partial class ItemView : UserControl
 				if (valueVm is ItemMemory itemVm)
 				{
 					IItem? item = ItemUtility.GetItem(slots, 0, itemVm.Base, itemVm.Variant, this.Actor.IsChocobo);
-					IDye? dye = GameDataService.Dyes.Get(itemVm.Dye);
-					IDye? dye2 = GameDataService.Dyes.Get(itemVm.Dye2);
+					IDye? dye = GameDataService.Dyes.GetRow(itemVm.Dye);
+					IDye? dye2 = GameDataService.Dyes.GetRow(itemVm.Dye2);
 
 					await Dispatch.MainThread();
 
@@ -449,8 +449,8 @@ public partial class ItemView : UserControl
 					if (weaponVm.Set == 0)
 						weaponVm.Dye = 0;
 
-					IDye? dye = GameDataService.Dyes.Get(weaponVm.Dye);
-					IDye? dye2 = GameDataService.Dyes.Get(weaponVm.Dye2);
+					IDye? dye = GameDataService.Dyes.GetRow(weaponVm.Dye);
+					IDye? dye2 = GameDataService.Dyes.GetRow(weaponVm.Dye2);
 
 					await Dispatch.MainThread();
 

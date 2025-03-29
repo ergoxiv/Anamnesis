@@ -3,11 +3,11 @@
 
 namespace Anamnesis.Actor.Utilities;
 
-using System.Collections.Concurrent;
 using Anamnesis.Actor.Items;
 using Anamnesis.GameData;
 using Anamnesis.GameData.Excel;
 using Anamnesis.Services;
+using System.Collections.Concurrent;
 
 public static class ItemUtility
 {
@@ -22,10 +22,10 @@ public static class ItemUtility
 	private static readonly ConcurrentDictionary<string, IItem> ItemLookup = new ConcurrentDictionary<string, IItem>();
 	private static readonly ConcurrentDictionary<string, IItem> ChocoboItemLookup = new ConcurrentDictionary<string, IItem>();
 
-	public static IItem EmperorsNewFists => GameDataService.Items.Get(13775);
+	public static IItem EmperorsNewFists => GameDataService.Items.GetRow(13775);
 
-	public static ChocoboSkinItem YellowChocoboSkin => new(GameDataService.Mounts.Get(1), 1);
-	public static ChocoboSkinItem BlackChocoboSkin => new(GameDataService.Mounts.Get(1), 2);
+	public static ChocoboSkinItem YellowChocoboSkin => new(GameDataService.Mounts.GetRow(1), 1);
+	public static ChocoboSkinItem BlackChocoboSkin => new(GameDataService.Mounts.GetRow(1), 2);
 
 	/// <summary>
 	/// Searches the gamedata service item list for an item with the given model attributes.
