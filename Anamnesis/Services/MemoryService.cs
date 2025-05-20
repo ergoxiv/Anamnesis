@@ -116,6 +116,12 @@ public partial class MemoryService : ServiceBase<MemoryService>, IProcessMemoryR
 		}
 	}
 
+	/// <summary>Gets the current game version.</summary>
+	/// <remarks>
+	/// This property contains a valid value only after <see cref="MemoryService"/> is initialized.
+	/// </remarks>
+	public static string CurrentGameVersion { get; private set; } = string.Empty;
+
 	/// <inheritdoc/>
 	bool IProcessMemoryReader.IsProcessAlive => IsProcessAlive;
 
@@ -643,6 +649,7 @@ public partial class MemoryService : ServiceBase<MemoryService>, IProcessMemoryR
 		string gameVer = await Task.Run(() => File.ReadAllText(file));
 
 		Log.Information($"Found game version: {gameVer}");
+		CurrentGameVersion = gameVer;
 
 		if (gameVer != VersionInfo.ValidatedGameVersion)
 		{
