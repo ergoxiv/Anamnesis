@@ -40,6 +40,11 @@ public class PoseFile : JsonFileBase
 
 	public override string FileExtension => ".pose";
 	public override string TypeName => "Anamnesis Pose";
+	public string GameVersion => MemoryService.CurrentGameVersion;
+	public ActorCustomizeMemory.Races? Race { get; set; }
+	public ActorCustomizeMemory.Tribes? Tribe { get; set; }
+	public ActorCustomizeMemory.Genders? Gender { get; set; }
+	public byte? Face { get; set; }
 
 	public Vector3? Position { get; set; }
 	public Quaternion? Rotation { get; set; }
@@ -81,6 +86,15 @@ public class PoseFile : JsonFileBase
 
 		if (skeleton == null || skeleton.Bones == null)
 			throw new Exception("No skeleton in actor");
+
+		if (actor.Customize == null)
+			throw new Exception("The target actor's customize memory is not valid");
+
+		this.Race = actor.Customize.Race;
+		this.Tribe = actor.Customize.Tribe;
+		this.Gender = actor.Customize.Gender;
+		this.Face = actor.Customize.Head;
+		// TODO: Perhaps store model as well
 
 		this.Rotation = actor.ModelObject.Transform.Rotation;
 		this.Position = actor.ModelObject.Transform.Position;

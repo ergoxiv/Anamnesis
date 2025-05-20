@@ -114,6 +114,12 @@ public partial class MemoryService : ServiceBase<MemoryService>
 		}
 	}
 
+	/// <summary>Gets the current game version.</summary>
+	/// <remarks>
+	/// This property contains a valid value only after <see cref="MemoryService"/> is initialized.
+	/// </remarks>
+	public static string CurrentGameVersion { get; private set; } = string.Empty;
+
 	/// <summary>
 	/// Reads a pointer from the specified memory address.
 	/// </summary>
@@ -599,6 +605,7 @@ public partial class MemoryService : ServiceBase<MemoryService>
 		string gameVer = File.ReadAllText(file);
 
 		Log.Information($"Found game version: {gameVer}");
+		CurrentGameVersion = gameVer;
 
 		if (gameVer != VersionInfo.ValidatedGameVersion)
 		{

@@ -18,27 +18,41 @@
 			<ColumnDefinition/>
 		</Grid.ColumnDefinitions>
 
-		<GroupBox Style="{StaticResource PanelGroupBox}" Grid.Column="0">
-			<GroupBox.Header>
-				<controls:Header Icon="Database" Text="Game Data"/>
-			</GroupBox.Header>
+		<StackPanel Grid.Column="0" Orientation="Vertical">
+			<GroupBox Style="{StaticResource PanelGroupBox}" Grid.Column="0" Grid.Row="0">
+				<GroupBox.Header>
+					<controls:Header Icon="Database" Text="Game Data"/>
+				</GroupBox.Header>
 
-			<StackPanel>
-				<Button Content="Search Battle Npc Names"
-						Style="{StaticResource TransparentButton}"
-						Height="32"
-						Click="OnNpcNameSearchClicked"/>
+				<StackPanel>
+					<Button Content="Search Battle Npc Names"
+				Style="{StaticResource TransparentButton}"
+				Height="32"
+				Click="OnNpcNameSearchClicked"/>
 
-				<Button Content="Search for NPC Data"
-						Click="OnFindNpcClicked"
-						Height="32"
-						Style="{StaticResource TransparentButton}"
-						Padding="6,3"/>
+					<Button Content="Search for NPC Data"
+				Click="OnFindNpcClicked"
+				Height="32"
+				Style="{StaticResource TransparentButton}"
+				Padding="6,3"/>
 
-			</StackPanel>
-		</GroupBox>
+				</StackPanel>
+			</GroupBox>
+			<GroupBox Style="{StaticResource PanelGroupBox}" Grid.Column="0" Grid.Row="1" Visibility="{Binding IsDebug, Mode=OneTime, Converter={StaticResource B2V}}">
+				<GroupBox.Header>
+					<controls:Header Icon="Code" Text="Scripts"/>
+				</GroupBox.Header>
 
-        <GroupBox Style="{StaticResource PanelGroupBox}" Grid.Column="1">
+				<StackPanel>
+					<Button Content="Generate Facial Offsets"
+							Style="{StaticResource TransparentButton}"
+							Height="32"
+							Click="OnGenerateFaceOffsets"/>
+				</StackPanel>
+			</GroupBox>
+		</StackPanel>
+		
+		<GroupBox Style="{StaticResource PanelGroupBox}" Grid.Column="1">
             <GroupBox.Header>
 				<StackPanel Orientation="Horizontal">
 					<controls:Header Icon="Running" Text="Actor - "/>

@@ -468,6 +468,39 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 			if (result.File is not PoseFile poseFile)
 				return;
 
+			// Only adapt if both pose file and actor have all required info
+			if (poseFile.Race.HasValue && poseFile.Tribe.HasValue && poseFile.Gender.HasValue && poseFile.Face.HasValue &&
+				this.Actor.ModelObject != null && this.Actor.Customize != null)
+			{
+				// Compose keys as used in BonePosTranslations (e.g., "Hyur_Midlander_Masculine_1")
+				string poseSourceKey = $"{poseFile.Race?.ToString().ToLower()}_{poseFile.Tribe?.ToString().ToLower()}_{(poseFile.Gender.Value == ActorCustomizeMemory.Genders.Masculine ? "m" : "f")}_f{poseFile.Face:000}";
+				string actorTargetKey = $"{this.Actor.Customize.Race.ToString().ToLower()}_{this.Actor.Customize.Tribe.ToString().ToLower()}_{(this.Actor.Customize.Gender == ActorCustomizeMemory.Genders.Masculine ? "m" : "f")}_f{this.Actor.Customize.Head:000}";
+
+				if (!poseSourceKey.Equals(actorTargetKey, StringComparison.OrdinalIgnoreCase))
+				{
+					try
+					{
+						var boneDelta = PoseService.ConvertToTarget(poseSourceKey, actorTargetKey);
+
+						if (poseFile.Bones != null)
+						{
+							foreach (var (boneName, bone) in poseFile.Bones)
+							{
+								if (bone?.Position != null && boneDelta.TryGetValue(boneName, out var delta))
+								{
+									bone.Position += delta;
+									Log.Debug($"Bone: {boneName}, Delta: {delta}");
+								}
+							}
+						}
+					}
+					catch (Exception ex)
+					{
+						Log.Warning(ex, $"Pose compatibility adaptation failed ({poseSourceKey} → {actorTargetKey})");
+					}
+				}
+			}
+
 			Dictionary<Bone, Vector3> facePositions = new();
 			bool mismatchedFaceBones = false;
 

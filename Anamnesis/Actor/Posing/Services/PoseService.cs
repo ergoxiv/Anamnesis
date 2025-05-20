@@ -9,8 +9,10 @@ using Anamnesis.Memory;
 using Anamnesis.Services;
 using PropertyChanged;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Threading.Tasks;
 
 [AddINotifyPropertyChangedInterface]
@@ -41,6 +43,8 @@ public class PoseService : ServiceBase<PoseService>
 	public static event PoseEvent? FreezeWorldPositionsEnabledChanged;
 
 	public static string? SelectedBonesText { get; set; }
+
+	public static Dictionary<string, Dictionary<string, Vector3>>? BonePosTranslations { get; private set; }
 
 	public bool IsEnabled
 	{
@@ -175,6 +179,39 @@ public class PoseService : ServiceBase<PoseService>
 
 	public bool CanEdit { get; set; }
 
+	public static Dictionary<string, Vector3> ConvertToTarget(string source, string target)
+	{
+		if (BonePosTranslations == null)
+			throw new Exception("BonePosTranslations not loaded.");
+
+		if (!BonePosTranslations.ContainsKey(source))
+			throw new Exception($"No translation found for source: {source}");
+
+		if (!BonePosTranslations.ContainsKey(target))
+			throw new Exception($"No translation found for target: {target}");
+
+		var sourceOffsets = BonePosTranslations[source];
+		var targetOffsets = BonePosTranslations[target];
+
+		var allBones = new HashSet<string>(sourceOffsets.Keys);
+		allBones.UnionWith(targetOffsets.Keys);
+
+		var result = new Dictionary<string, Vector3>();
+
+		foreach (var bone in allBones)
+		{
+			// Default to Vector3.Zero if a bone is missing in either dictionary
+			sourceOffsets.TryGetValue(bone, out var sourceOffset);
+			targetOffsets.TryGetValue(bone, out var targetOffset);
+
+			// The difference to apply to the source pose to get the target pose
+			var delta = targetOffset - sourceOffset;
+			result[bone] = delta;
+		}
+
+		return result;
+	}
+
 	public override async Task Initialize()
 	{
 		await base.Initialize();
@@ -197,6 +234,16 @@ public class PoseService : ServiceBase<PoseService>
 		this.kineDriverScale = new NopHook(AddressService.KineDriverScale, 6);
 
 		GposeService.GposeStateChanged += this.OnGposeStateChanged;
+
+		// Load translation data for bones
+		try
+		{
+			BonePosTranslations = EmbeddedFileUtility.Load<Dictionary<string, Dictionary<string, Vector3>>>("Data/FaceOffsets.json");
+		}
+		catch (Exception ex)
+		{
+			Log.Error(ex, "Failed to load bone translations");
+		}
 
 		_ = Task.Run(ExtractStandardPoses);
 	}
