@@ -260,7 +260,7 @@ internal sealed class Injector : IDisposable
 				throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to set memory protection");
 
 			// Execute and check result
-			uint exitCode = this.RunRemoteThread(codeAddr, IntPtr.Zero, false);
+			uint exitCode = this.RunRemoteThread(codeAddr, IntPtr.Zero);
 			if (exitCode == 0)
 				throw new InvalidOperationException($"GetProcAddress could not find export '{funcName}'. Ensure the DLL is compiled with native AOT.");
 
@@ -319,7 +319,7 @@ internal sealed class Injector : IDisposable
 		VirtualFreeEx(this.targetProcess.Handle, addr, 0, (uint)MemoryFreeType.MEM_RELEASE);
 	}
 
-	private uint RunRemoteThread(IntPtr startAddress, IntPtr parameter, bool waitForExit = true)
+	private uint RunRemoteThread(IntPtr startAddress, IntPtr parameter)
 	{
 		IntPtr hThread = CreateRemoteThread(this.targetProcess.Handle, IntPtr.Zero, 0, startAddress, parameter, 0, out _);
 		if (hThread == IntPtr.Zero)
@@ -327,9 +327,6 @@ internal sealed class Injector : IDisposable
 
 		try
 		{
-			if (!waitForExit)
-				return 1; // Non-zero value to indicate success
-
 			uint waitResult = WaitForSingleObject(hThread, uint.MaxValue);
 			if (waitResult != 0) // WAIT_OBJECT_0 is 0, all other exit codes are either an error or timeout
 				throw new Win32Exception(Marshal.GetLastWin32Error(), $"WaitForSingleObject failed with result: {waitResult}");

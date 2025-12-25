@@ -28,6 +28,7 @@
 // - The different processes have read/write pointers on that file, presented as offsets in the file.
 
 using Serilog;
+using SharedMemoryIPC;
 using System.Runtime.InteropServices;
 
 using static RemoteController.NativeFunctions;
@@ -36,21 +37,76 @@ namespace RemoteController;
 
 public class Controller
 {
-	// TODO: Implement a watchdog-heartbeat mechanism to keep the remote controller alive by sending heartbeat messages from the main
-	// application. If the controller does not receive a heartbeat within a certain timeout (e.g., 60 seconds), it should exit out of the
-	// loop to unload itself from the target process.
+	private const string BUF_SHMEM_OUTGOING = "Local\\ANAM_SHMEM_CTRL_TO_MAIN";
+	private const string BUF_SHMEM_INCOMING = "Local\\ANAM_SHMEM_MAIN_TO_CTRL";
+	private const uint WATCHDOG_TIMEOUT_MS = 60000;
+
+	private static Endpoint? s_outgoingEndpoint = null;
+	private static Endpoint? s_incomingEndpoint = null;
+
+	private static long s_heartbeatTimestamp = 0;
+	private const uint READ_TIMEOUT_MS = 16;
 
 	private static unsafe void* NativePtr() => (delegate* unmanaged<void>)&RemoteControllerEntry;
 
 	[UnmanagedCallersOnly(EntryPoint = "RemoteControllerEntry")]
 	public static void RemoteControllerEntry()
 	{
+		var workerThread = new Thread(Main)
+		{
+			IsBackground = false,
+			Name = "RemoteController.Main",
+		};
+		workerThread.Start();
+	}
+
+	private static void Main()
+	{
 		try
 		{
 			Logger.Initialize();
 			Log.Information("Starting remote controller...");
 
-			Thread.Sleep(10000); // Simulate some work being done.
+			// Initialize shared memory endpoints
+			try
+			{
+				s_outgoingEndpoint = new Endpoint(BUF_SHMEM_OUTGOING);
+				s_incomingEndpoint = new Endpoint(BUF_SHMEM_INCOMING);
+			}
+			catch (Exception ex)
+			{
+				/* Don't throw to avoid crashing the game process */
+				Log.Error(ex, "Failed to initialize IPC endpoints.");
+				return;
+			}
+			
+			s_heartbeatTimestamp = Environment.TickCount64;
+
+			// Main loop
+			while (true)
+			{
+				// Check for incoming messages
+				if (s_incomingEndpoint != null && s_incomingEndpoint.Read(out MessageHeader header, READ_TIMEOUT_MS))
+				{
+					switch (header.Type)
+					{
+						case PayloadType.Heartbeat:
+							s_heartbeatTimestamp = Environment.TickCount64;
+							Log.Debug("Received heartbeat message.");
+							break;
+						default:
+							Log.Warning($"Received unknown message type: {header.Type}");
+							break;
+					}
+				}
+
+				var now = Environment.TickCount64;
+				if (now - s_heartbeatTimestamp > WATCHDOG_TIMEOUT_MS)
+				{
+					Log.Warning("No heartbeat received for 60 seconds. Terminating controller.");
+					break;
+				}
+			}
 		}
 		finally
 		{
@@ -76,5 +132,9 @@ public class Controller
 	{
 		Log.Information("Running shutdown sequence...");
 		Logger.Deinitialize();
+		s_outgoingEndpoint?.Dispose();
+		s_outgoingEndpoint = null;
+		s_incomingEndpoint?.Dispose();
+		s_incomingEndpoint = null;
 	}
 }
