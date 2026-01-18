@@ -112,7 +112,8 @@ public class ControllerService : ServiceBase<ControllerService>
 
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
 
-	private readonly ConcurrentQueue<PendingHookRegistration> registrationQueue = new();
+	private readonly ConcurrentDictionary<string, HookRegistrationInfo> allHooks = new();
+	private readonly ConcurrentQueue<HookRegistrationInfo> registrationQueue = new();
 	private readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> pendingHookRequests = new();
 	private readonly ConcurrentDictionary<uint, PendingRequest<uint>> pendingRegistrations = new();
 	private readonly ConcurrentDictionary<uint, PendingRequest<bool>> pendingUnregistrations = new();
@@ -169,9 +170,15 @@ public class ControllerService : ServiceBase<ControllerService>
 			kvp.Value.Dispose();
 		}
 
+		foreach (var kvp in this.allHooks)
+		{
+			kvp.Value.Handle.Dispose();
+		}
+
 		this.pendingHookRequests.Clear();
 		this.pendingRegistrations.Clear();
 		this.pendingUnregistrations.Clear();
+		this.allHooks.Clear();
 		this.outgoingEndpoint?.Dispose();
 		this.incomingEndpoint?.Dispose();
 		await base.Shutdown();
@@ -560,6 +567,9 @@ public class ControllerService : ServiceBase<ControllerService>
 		registerPayload.SetKey(delegateKey);
 
 		var handle = new HookHandle(this, 0, delegateKey);
+		var pending = new HookRegistrationInfo(handle, registerPayload, handler);
+		this.allHooks[delegateKey] = pending;
+
 		if (this.isConnected)
 		{
 			if (this.RegisterHookIPC(handle, registerPayload, handler, timeoutMs))
@@ -570,7 +580,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		else
 		{
 			Log.Information($"Remote controller not available. Queueing hook[Key: {delegateKey}] for later registration.");
-			this.registrationQueue.Enqueue(new PendingHookRegistration(handle, registerPayload, handler));
+			this.registrationQueue.Enqueue(pending);
 			return handle;
 		}
 	}
@@ -610,6 +620,7 @@ public class ControllerService : ServiceBase<ControllerService>
 				var keyToRemove = this.delegateKeyToHookId.FirstOrDefault(kvp => kvp.Value == hookId).Key;
 				if (keyToRemove != null)
 				{
+					this.allHooks.TryRemove(keyToRemove, out _);
 					this.delegateKeyToHookId.TryRemove(keyToRemove, out _);
 				}
 
@@ -621,6 +632,34 @@ public class ControllerService : ServiceBase<ControllerService>
 		finally
 		{
 			this.pendingUnregistrations.TryRemove(hookId, out _);
+		}
+	}
+
+	private void InvalidateAllHooks()
+	{
+		foreach (var kvp in this.allHooks)
+		{
+			var handle = kvp.Value.Handle;
+			if (handle.IsValid)
+			{
+				handle.SetHookId(0);
+				Log.Debug($"Invalidated hook[Key: {handle.DelegateKey}].");
+			}
+		}
+
+		this.delegateKeyToHookId.Clear();
+	}
+
+	private void RequeueAllInvalidatedHooks()
+	{
+		foreach (var kvp in this.allHooks)
+		{
+			var regInfo = kvp.Value;
+			if (regInfo.Handle.HookId == 0 && !this.registrationQueue.Contains(regInfo))
+			{
+				this.registrationQueue.Enqueue(regInfo);
+				Log.Debug($"Re-queued previously invalidated hook[Key: {regInfo.Handle.DelegateKey}].");
+			}
 		}
 	}
 
@@ -670,12 +709,14 @@ public class ControllerService : ServiceBase<ControllerService>
 						this.heartbeatTimer?.Dispose();
 						this.heartbeatTimer = null;
 
+						// Deactivate system hooks
 						if (this.framework != null)
 						{
 							this.framework.Active = false;
 						}
 
 						this.isConnected = false;
+						this.InvalidateAllHooks();
 					}
 
 					await Task.Delay(CONN_CHECK_DELAY_MS, ct);
@@ -685,6 +726,7 @@ public class ControllerService : ServiceBase<ControllerService>
 				if (!this.isConnected)
 				{
 					Log.Information("Connection established with remote controller.");
+					this.RequeueAllInvalidatedHooks();
 					await this.SendPendingRegistrations();
 					this.heartbeatTimer ??= new Timer(this.SendHeartbeat, null, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS);
 
@@ -1057,7 +1099,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			Log.Warning("Remote controller shutdown reported failure.");
 	}
 
-	private record PendingHookRegistration(
+	private record HookRegistrationInfo(
 		HookHandle Handle,
 		HookRegistrationData Data,
 		Func<ReadOnlySpan<byte>, byte[]>? Handler);

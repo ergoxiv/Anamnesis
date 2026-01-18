@@ -20,8 +20,6 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 
-// TODO: Add fallback to the old method of adding bones if the new method fails.
-
 /// <summary>
 /// Represents a skeleton of hierarchically-parented bones of an actor that can be posed.
 /// </summary>
