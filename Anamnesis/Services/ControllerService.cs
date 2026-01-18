@@ -145,7 +145,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <inheritdoc/>
 	public override async Task Initialize()
 	{
-		this.framework = new FrameworkService(this.frameworkQueue, this.SendFrameworkSyncState);
+		this.framework = new FrameworkService(this.frameworkQueue, this.SendFrameworkSyncRequest);
 		await base.Initialize();
 	}
 
@@ -1006,7 +1006,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 	}
 
-	private void SendFrameworkSyncState(bool enable)
+	private void SendFrameworkSyncRequest()
 	{
 		if (this.outgoingEndpoint == null)
 			return;
@@ -1063,15 +1063,16 @@ public class ControllerService : ServiceBase<ControllerService>
 		Func<ReadOnlySpan<byte>, byte[]>? Handler);
 }
 
-public class FrameworkService(WorkQueue queue, Action<bool> setSyncState)
+public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 {
 	private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(1);
 
 	private readonly WorkQueue workQueue = queue;
 	private readonly List<ConditionalTask> conditionalTasks = new();
 	private readonly Lock queueLock = new();
-	private readonly Action<bool> setSyncState = setSyncState;
+	private readonly Action sendSyncRequest = sendSyncRequest;
 
+	private int loopState = 0; // 0 = Idle, 1 = Active
 	private bool active = false;
 
 	public bool Active
@@ -1096,7 +1097,11 @@ public class FrameworkService(WorkQueue queue, Action<bool> setSyncState)
 		}
 
 		var task = this.workQueue.Enqueue(action);
-		this.setSyncState(true);
+		if (Interlocked.CompareExchange(ref this.loopState, 1, 0) == 0)
+		{
+			this.sendSyncRequest();
+		}
+
 		return task;
 	}
 
@@ -1138,7 +1143,10 @@ public class FrameworkService(WorkQueue queue, Action<bool> setSyncState)
 			this.conditionalTasks.Add(new ConditionalTask(condition, action));
 		}
 
-		this.setSyncState(true);
+		if (Interlocked.CompareExchange(ref this.loopState, 1, 0) == 0)
+		{
+			this.sendSyncRequest();
+		}
 	}
 
 	/// <summary>
@@ -1152,7 +1160,7 @@ public class FrameworkService(WorkQueue queue, Action<bool> setSyncState)
 	/// </remarks>
 	internal bool ProcessTick()
 	{
-		bool keepSyncing = false;
+		bool remainingWork = false;
 
 		lock (this.queueLock)
 		{
@@ -1188,13 +1196,28 @@ public class FrameworkService(WorkQueue queue, Action<bool> setSyncState)
 			}
 
 			// If we still have conditions to check, keep syncing with framework tick
-			if (this.conditionalTasks.Count > 0)
-				keepSyncing = true;
+			remainingWork = this.conditionalTasks.Count > 0;
 		}
 
-		bool queueHasItems = this.workQueue.ProcessPending(s_frameBudget);
+		remainingWork |= this.workQueue.ProcessPending(s_frameBudget);
 
-		return keepSyncing || queueHasItems;
+		if (!remainingWork)
+		{
+			Interlocked.Exchange(ref this.loopState, 0);
+
+			// Double-check after setting to idle to make sure no work was enqueued
+			// After processing pending tasks in the queue and before setting the
+			// internal loop state to idle.
+			if (!this.workQueue.IsEmpty || this.conditionalTasks.Count > 0)
+			{
+				if (Interlocked.CompareExchange(ref this.loopState, 1, 0) == 0)
+					return true;
+			}
+
+			return false;
+		}
+
+		return true;
 	}
 
 	private record struct ConditionalTask(Func<bool> Condition, Action Action);

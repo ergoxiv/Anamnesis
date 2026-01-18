@@ -48,6 +48,11 @@ public class WorkQueue
 	}
 
 	/// <summary>
+	/// Gets a value indicating whether the queue is empty.
+	/// </summary>
+	public bool IsEmpty => !this.reader.CanPeek || !this.reader.TryPeek(out _);
+
+	/// <summary>
 	/// Enqueue a work item asynchronously.
 	/// </summary>
 	/// <param name="action">
