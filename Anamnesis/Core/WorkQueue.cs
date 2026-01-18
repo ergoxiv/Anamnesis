@@ -3,6 +3,7 @@
 
 namespace Anamnesis.Core;
 
+using Serilog;
 using System;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -142,6 +143,49 @@ public class WorkQueue
 					throw;
 			}
 		}
+	}
+
+	/// <summary>
+	/// Process pending work items within a specific time budget.
+	/// </summary>
+	/// <param name="budget">
+	/// The maximum time allowed for processing.
+	/// </param>
+	/// <returns>
+	/// True if there are still items remaining in the queue; otherwise, false.
+	/// </returns>
+	public bool ProcessPending(TimeSpan budget)
+	{
+		if (!this.Enabled)
+			return false;
+
+		var sw = System.Diagnostics.Stopwatch.StartNew();
+		var reader = this.reader;
+
+		while (reader.TryRead(out var item))
+		{
+			try
+			{
+				item.Action();
+				item.Tcs?.TrySetResult();
+			}
+			catch (Exception ex)
+			{
+				if (item.Tcs != null)
+				{
+					item.Tcs.TrySetException(ex);
+				}
+				else
+				{
+					Log.Error(ex, "Error in work queue while processing task");
+				}
+			}
+
+			if (sw.Elapsed > budget)
+				return true; // Return true to check for pending work on next process call
+		}
+
+		return false; // Queue is fully drained
 	}
 
 	private readonly struct WorkItem(Action action, TaskCompletionSource? tcs = null)

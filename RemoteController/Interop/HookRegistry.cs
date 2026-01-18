@@ -205,7 +205,7 @@ public sealed class HookRegistry
 		{
 			uint candidate = this.nextHookID++;
 
-			if (this.nextHookID >= HookMessageId.MAX_HOOK_ID)
+			if (this.nextHookID >= HookMessageId.MAX_STANDARD_HOOK_ID)
 				this.nextHookID = 1; // Skip 0 (Reserved for invalid hooks)
 
 			if (!this.activeHooks.ContainsKey(candidate))

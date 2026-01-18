@@ -6,29 +6,6 @@ namespace RemoteController.Interop;
 using System;
 
 /// <summary>
-/// An enum that specifies the invocation context of a function hook.
-/// Applicable only to <see cref="HookType.Wrapper"/> hooks.
-/// </summary>
-/// <remarks>
-/// <see cref="HookType.Interceptor"/> function hooks are always invoked
-/// synchronously within the existing call flow of the original function.
-/// </remarks>
-public enum HookInvokeContext
-{
-	/// <summary>
-	/// Invoke the function hook at the beginning of a framework
-	/// thread frame.
-	/// </summary>
-	FrameworkThread,
-
-	/// <summary>
-	/// Invoke the function hook asynchronously, detached from
-	/// the framework thread.
-	/// </summary>
-	Detached,
-}
-
-/// <summary>
 /// An enum that specifies the invocation behavior of a function hook.
 /// </summary>
 public enum HookBehavior
@@ -63,6 +40,12 @@ public enum HookType
 	/// <see cref="HookBehavior"/> for all available hook behavior options.
 	/// </summary>
 	Interceptor,
+
+	/// <summary>
+	/// A special interceptor hook type designed for system-level functions
+	/// that usually requires specific handling.
+	/// </summary>
+	System,
 }
 
 /// <summary>
@@ -72,7 +55,7 @@ public enum HookType
 /// <param name="signature">The memory signature of the function to hook.</param>
 /// <param name="offset">An optional offset to apply after signature resolution.</param>
 [AttributeUsage(AttributeTargets.Delegate, AllowMultiple = false)]
-public sealed class FunctionBindAttribute(string signature, int offset = 0, HookInvokeContext invokeCtx = HookInvokeContext.Detached) : Attribute
+public sealed class FunctionBindAttribute(string signature, int offset = 0) : Attribute
 {
 	/// <summary>
 	/// Gets the memory signature of the function to hook.
@@ -83,13 +66,4 @@ public sealed class FunctionBindAttribute(string signature, int offset = 0, Hook
 	/// Gets the offset to apply after signature resolution.
 	/// </summary>
 	public int Offset { get; } = offset;
-
-	/// <summary>
-	/// Gets the invocation context for this function hook.
-	/// </summary>
-	/// <remarks>
-	/// See <see cref="HookInvokeContext"/> for more information
-	/// on all available hook invocation contexts.
-	/// </remarks>
-	public HookInvokeContext InvokeContext { get; } = invokeCtx;
 }

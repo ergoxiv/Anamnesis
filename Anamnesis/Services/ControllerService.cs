@@ -9,6 +9,7 @@ using Anamnesis.Services;
 using RemoteController;
 using RemoteController.Interop;
 using RemoteController.IPC;
+using Serilog;
 using SharedMemoryIPC;
 using System;
 using System.Buffers;
@@ -112,7 +113,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
 
 	private readonly ConcurrentQueue<PendingHookRegistration> registrationQueue = new();
-	private readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> pendingWrapperRequests = new();
+	private readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> pendingHookRequests = new();
 	private readonly ConcurrentDictionary<uint, PendingRequest<uint>> pendingRegistrations = new();
 	private readonly ConcurrentDictionary<uint, PendingRequest<bool>> pendingUnregistrations = new();
 	private readonly ConcurrentDictionary<uint, Func<ReadOnlySpan<byte>, byte[]>> handlers = new();
@@ -121,22 +122,39 @@ public class ControllerService : ServiceBase<ControllerService>
 	private readonly ObjectPool<PendingRequest<byte[]>> wrapperRequestPool = new(maxSize: 64);
 	private readonly PendingRequest<bool> pendingByeMessage = new();
 
-	private uint nextRequestId = 1;
+	private readonly WorkQueue frameworkQueue = new();
+	private FrameworkService? framework;
+
+	private uint nextRequestId = 0;
 
 	private Endpoint? outgoingEndpoint = null;
 	private Endpoint? incomingEndpoint = null;
 	private Timer? heartbeatTimer;
 	private bool isConnected = false;
 
+	/// <summary>
+	/// Gets the framework service used for executing
+	/// work on the game process' framework tick.
+	/// </summary>
+	public FrameworkService Framework => this.framework
+		?? throw new InvalidOperationException("Framework is not initialized");
+
 	/// <inheritdoc/>
 	protected override IEnumerable<IService> Dependencies => [GameService.Instance];
+
+	/// <inheritdoc/>
+	public override async Task Initialize()
+	{
+		this.framework = new FrameworkService(this.frameworkQueue, this.SendFrameworkSyncState);
+		await base.Initialize();
+	}
 
 	/// <inheritdoc/>
 	public override async Task Shutdown()
 	{
 		this.SendShutdownMessage();
 
-		foreach (var kvp in this.pendingWrapperRequests)
+		foreach (var kvp in this.pendingHookRequests)
 		{
 			kvp.Value.Dispose();
 		}
@@ -151,7 +169,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			kvp.Value.Dispose();
 		}
 
-		this.pendingWrapperRequests.Clear();
+		this.pendingHookRequests.Clear();
 		this.pendingRegistrations.Clear();
 		this.pendingUnregistrations.Clear();
 		this.outgoingEndpoint?.Dispose();
@@ -246,7 +264,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		uint msgId = HookMessageId.Pack(hookId, seq);
 
 		var pending = this.wrapperRequestPool.Get();
-		this.pendingWrapperRequests[msgId] = pending;
+		this.pendingHookRequests[msgId] = pending;
 
 		try
 		{
@@ -284,7 +302,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 		finally
 		{
-			this.pendingWrapperRequests.TryRemove(msgId, out _);
+			this.pendingHookRequests.TryRemove(msgId, out _);
 			pending.Reset();
 			this.wrapperRequestPool.Return(pending);
 		}
@@ -403,7 +421,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	}
 
 	/// <summary>
-	/// An encapsulateion of the IPC request registration logic.
+	/// An encapsulation of the IPC request registration logic.
 	/// </summary>
 	/// <param name="handle">
 	/// The handle of the hook to register.
@@ -651,6 +669,12 @@ public class ControllerService : ServiceBase<ControllerService>
 						Log.Warning("Connection lost with remote controller.");
 						this.heartbeatTimer?.Dispose();
 						this.heartbeatTimer = null;
+
+						if (this.framework != null)
+						{
+							this.framework.Active = false;
+						}
+
 						this.isConnected = false;
 					}
 
@@ -663,6 +687,14 @@ public class ControllerService : ServiceBase<ControllerService>
 					Log.Information("Connection established with remote controller.");
 					await this.SendPendingRegistrations();
 					this.heartbeatTimer ??= new Timer(this.SendHeartbeat, null, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS);
+
+					// Register system hooks
+					if (this.framework != null)
+					{
+						this.framework.Active = true;
+						this.RegisterFrameworkHook();
+					}
+
 					this.isConnected = true;
 				}
 
@@ -709,7 +741,7 @@ public class ControllerService : ServiceBase<ControllerService>
 								{
 									try
 									{
-										this.HandleInterceptRequest(header.Id, payloadCopy.AsSpan(0, length));
+										this.HandleHookRequest(header.Id, payloadCopy.AsSpan(0, length));
 									}
 									finally
 									{
@@ -720,7 +752,7 @@ public class ControllerService : ServiceBase<ControllerService>
 							break;
 
 						case PayloadType.Blob:
-							this.HandleWrapperReturn(header.Id, payload);
+							this.HandleHookReturn(header.Id, payload);
 							break;
 
 						default:
@@ -815,19 +847,19 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 	}
 
-	private void HandleWrapperReturn(uint msgId, ReadOnlySpan<byte> resultData)
+	private void HandleHookReturn(uint msgId, ReadOnlySpan<byte> resultData)
 	{
-		if (this.pendingWrapperRequests.TryGetValue(msgId, out var pending))
+		if (this.pendingHookRequests.TryGetValue(msgId, out var pending))
 		{
 			pending.SetResult(resultData.ToArray());
 		}
 		else
 		{
-			Log.Warning($"Received wrapper result for unknown request: {msgId}");
+			Log.Warning($"Received hook result for unknown request: {msgId}");
 		}
 	}
 
-	private void HandleInterceptRequest(uint msgId, ReadOnlySpan<byte> payload)
+	private void HandleHookRequest(uint msgId, ReadOnlySpan<byte> payload)
 	{
 		uint hookId = HookMessageId.GetHookId(msgId);
 		byte[] response;
@@ -846,19 +878,152 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 		else
 		{
+			Log.Warning($"No handler registered for hook request: {hookId}");
 			response = [];
 		}
 
-		this.SendInterceptResponse(msgId, response);
+		this.SendResponse(msgId, response);
 	}
 
-	private void SendInterceptResponse(uint msgId, byte[] response)
+	private void SendResponse(uint msgId, byte[] response)
 	{
 		if (this.outgoingEndpoint == null)
 			return;
 
 		var header = new MessageHeader(msgId, PayloadType.Blob, (ulong)response.Length);
 		this.outgoingEndpoint.Write(header, response, IPC_TIMEOUT_MS);
+	}
+
+	private void RegisterFrameworkHook()
+	{
+		if (this.outgoingEndpoint == null)
+			throw new InvalidOperationException("Controller service not initialized.");
+
+		Type delType = typeof(RemoteController.Interop.Delegates.Framework.Tick);
+		string delegateKey = HookUtils.GetKey(delType);
+
+		if (this.delegateKeyToHookId.ContainsKey(delegateKey))
+		{
+			Log.Warning($"Hook already registered for: {delegateKey}");
+			return;
+		}
+
+		if (delType.GetCustomAttributes(typeof(FunctionBindAttribute), false)
+			.FirstOrDefault() is not FunctionBindAttribute attr)
+		{
+			Log.Error($"Delegate {delegateKey} is not decorated with FunctionBindAttribute");
+			return;
+		}
+
+		if (MemoryService.Scanner == null)
+			throw new Exception("No memory scanner");
+
+		nint targetAddress = 0;
+		try
+		{
+			// Get base vtable address
+			targetAddress = MemoryService.Scanner.GetStaticAddressFromSig(attr.Signature);
+
+			// Offset to function in vtable
+			targetAddress += attr.Offset;
+
+			// Resolve function address at vtable location
+			targetAddress = MemoryService.ReadPtr(targetAddress);
+		}
+		catch (KeyNotFoundException ex)
+		{
+			Log.Error(ex, $"Failed to resolve signature for: {delegateKey}");
+			return;
+		}
+
+		Log.Verbose($"Resolved signature for {delegateKey} to address 0x{targetAddress:X}");
+
+		if (targetAddress == 0)
+		{
+			Log.Error($"Failed to resolve signature for: {delegateKey}");
+			return;
+		}
+
+		var registerPayload = new HookRegistrationData
+		{
+			Address = targetAddress,
+			HookType = HookType.System,
+			HookBehavior = HookBehavior.After, // Ignored
+			DelegateKeyLength = delegateKey.Length,
+			HookId = HookMessageId.FRAMEWORK_SYSTEM_ID,
+		};
+		registerPayload.SetKey(delegateKey);
+
+		byte[] payload = MarshalUtils.Serialize(registerPayload);
+		uint requestId = this.GetNextRequestId();
+
+		using var pending = new PendingRequest<uint>();
+		this.pendingRegistrations[requestId] = pending;
+		try
+		{
+			var header = new MessageHeader(requestId, PayloadType.Register, (ulong)payload.Length);
+
+			if (!this.outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS))
+			{
+				Log.Error($"Failed to send hook registration request for: {delegateKey}");
+				return;
+			}
+
+			if (!pending.Wait(IPC_REGISTER_TIMEOUT_MS))
+			{
+				Log.Error($"Hook registration timed out for: {delegateKey}");
+				return;
+			}
+
+			if (!pending.TryGetResult(out uint hookId) || hookId == 0)
+			{
+				Log.Error($"Hook registration failed for: {delegateKey}");
+				return;
+			}
+
+			// Payload: [1] = Keep Syncing, [0] = Stop Syncing
+			this.handlers[HookMessageId.FRAMEWORK_SYSTEM_ID] = _ =>
+			{
+				if (this.framework == null)
+					return [0];
+
+				bool keepSyncing = this.framework?.ProcessTick() ?? false;
+				return [keepSyncing ? (byte)1 : (byte)0];
+			};
+
+			this.delegateKeyToHookId[delegateKey] = hookId;
+			Log.Information($"Registered hook[ID: {hookId}] for: {delegateKey}");
+			return;
+		}
+		catch (Exception ex)
+		{
+			Log.Error(ex, $"Exception during IPC registration for {delegateKey}");
+			return;
+		}
+		finally
+		{
+			this.pendingRegistrations.TryRemove(requestId, out _);
+		}
+	}
+
+	private void SendFrameworkSyncState(bool enable)
+	{
+		if (this.outgoingEndpoint == null)
+			return;
+
+		var data = new FrameworkMessageData { Type = FrameworkMessageType.EnableTickSync };
+		byte[] payload = MarshalUtils.Serialize(data);
+		var header = new MessageHeader(HookMessageId.FRAMEWORK_SYSTEM_ID, PayloadType.Request, (ulong)payload.Length);
+
+		uint msgId = header.Id;
+		var pending = new PendingRequest<byte[]>();
+		this.pendingHookRequests[msgId] = pending;
+
+		if (!this.outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS))
+		{
+			Log.Warning("Failed to send framework sync request");
+			this.pendingHookRequests.TryRemove(msgId, out _);
+		}
 	}
 
 	private uint GetNextRequestId()
@@ -896,4 +1061,141 @@ public class ControllerService : ServiceBase<ControllerService>
 		HookHandle Handle,
 		HookRegistrationData Data,
 		Func<ReadOnlySpan<byte>, byte[]>? Handler);
+}
+
+public class FrameworkService(WorkQueue queue, Action<bool> setSyncState)
+{
+	private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(1);
+
+	private readonly WorkQueue workQueue = queue;
+	private readonly List<ConditionalTask> conditionalTasks = new();
+	private readonly Lock queueLock = new();
+	private readonly Action<bool> setSyncState = setSyncState;
+
+	private bool active = false;
+
+	public bool Active
+	{
+		get => this.active;
+		internal set
+		{
+			this.workQueue.Enabled = value;
+			this.active = value;
+		}
+	}
+
+	/// <summary>
+	/// Executes an action within the next available framework tick.
+	/// </summary>
+	public Task RunOnTick(Action action)
+	{
+		if (!this.Active)
+		{
+			Log.Warning("The framework service is inactive. Dropping action.");
+			return Task.CompletedTask;
+		}
+
+		var task = this.workQueue.Enqueue(action);
+		this.setSyncState(true);
+		return task;
+	}
+
+	/// <summary>
+	/// Delays execution for a specific time, then runs on framework tick.
+	/// </summary>
+	public async Task RunOnTick(TimeSpan delay, Action action)
+	{
+		if (!this.Active)
+		{
+			Log.Warning("The framework service is inactive. Dropping action.");
+			return;
+		}
+
+		// NOTE: We wait locally to avoid blocking the framework thread
+		await Task.Delay(delay);
+		await this.RunOnTick(action);
+	}
+
+	/// <summary>
+	/// Executes an action within the context of the framework tick
+	/// once the provided condition evaluates to true.
+	/// </summary>
+	/// <remarks>
+	/// The framework service will check the condition on each tick until
+	/// it evaluates to true. Ensure that the condition will eventually be
+	/// met to avoid indefinite tick processing.
+	/// </remarks>
+	public void RunOnTickUntil(Func<bool> condition, Action action)
+	{
+		if (!this.Active)
+		{
+			Log.Warning("The framework service is inactive. Dropping action.");
+			return;
+		}
+
+		lock (this.queueLock)
+		{
+			this.conditionalTasks.Add(new ConditionalTask(condition, action));
+		}
+
+		this.setSyncState(true);
+	}
+
+	/// <summary>
+	/// Process pending tasks within the context of the framework tick.
+	/// </summary>
+	/// <returns>
+	/// True if we need to keep hooking the next frame; False if we are idle.
+	/// </returns>
+	/// <remarks>
+	/// This method is intended to be called by <see cref="ControllerService"/>.
+	/// </remarks>
+	internal bool ProcessTick()
+	{
+		bool keepSyncing = false;
+
+		lock (this.queueLock)
+		{
+			for (int i = this.conditionalTasks.Count - 1; i >= 0; i--)
+			{
+				var task = this.conditionalTasks[i];
+				bool isReady = false;
+
+				try
+				{
+					isReady = task.Condition();
+				}
+				catch (Exception ex)
+				{
+					// NOTE: All tasks and conditional should have inner error handling.
+					// This is in place just to inform of any uncaught errors.
+					Log.Error(ex, $"Error evaluating conditional task in framework service.");
+				}
+
+				if (isReady)
+				{
+					try
+					{
+						task.Action();
+					}
+					catch (Exception ex)
+					{
+						Log.Error(ex, $"Error executing action task in framework service.");
+					}
+
+					this.conditionalTasks.RemoveAt(i);
+				}
+			}
+
+			// If we still have conditions to check, keep syncing with framework tick
+			if (this.conditionalTasks.Count > 0)
+				keepSyncing = true;
+		}
+
+		bool queueHasItems = this.workQueue.ProcessPending(s_frameBudget);
+
+		return keepSyncing || queueHasItems;
+	}
+
+	private record struct ConditionalTask(Func<bool> Condition, Action Action);
 }

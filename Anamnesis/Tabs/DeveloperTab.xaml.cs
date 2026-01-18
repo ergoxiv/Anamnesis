@@ -104,6 +104,41 @@ public partial class DeveloperTab : UserControl
 		});
 	}
 
+	private void OnFrameworkTask(object sender, RoutedEventArgs e)
+	{
+		ControllerService.Instance.Framework.RunOnTick(() =>
+		{
+			Log.Information("Framework Task Executed");
+		});
+	}
+
+	private async void OnFrameworkTaskDelayed(object sender, RoutedEventArgs e)
+	{
+		TimeSpan delay = TimeSpan.FromSeconds(5);
+
+		await ControllerService.Instance.Framework.RunOnTick(delay, () =>
+		{
+			Log.Information("Framework Delayed Task Executed");
+		});
+	}
+
+	private void OnFrameworkTaskCond(object sender, RoutedEventArgs e)
+	{
+		var counter = 0;
+		var targetTicks = 30;
+
+		ControllerService.Instance.Framework.RunOnTickUntil(
+			() =>
+			{
+				counter++;
+				return counter >= targetTicks;
+			},
+			() =>
+			{
+				Log.Information("Framework Conditional Task Executed");
+			});
+	}
+
 	private void OnCopyActorAddressClicked(object sender, RoutedEventArgs e)
 	{
 		var handle = TargetService.PlayerTargetHandle;

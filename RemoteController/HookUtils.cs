@@ -36,6 +36,11 @@ public static class HookUtils
 /// </remarks>
 public static class HookMessageId
 {
+	public const uint MAX_STANDARD_HOOK_ID = 0x00FFFFFF - SYSTEM_HOOK_COUNT - 1;
+
+	// Reserved hook identifiers for system hooks
+	public const uint SYSTEM_HOOK_COUNT = 1;
+	public const uint FRAMEWORK_SYSTEM_ID = MAX_STANDARD_HOOK_ID + 1;
 	public const uint MAX_HOOK_ID = 0x00FFFFFF;
 
 	/// <summary>

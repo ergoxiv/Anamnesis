@@ -21,6 +21,7 @@ public class Controller
 	private const uint WATCHDOG_TIMEOUT_MS = 60000;
 	private const uint WATCHDOG_TIMER_INTERVAL_MS = 15000;
 	private const int IPC_TIMEOUT_MS = 100;
+	private const int IPC_FAST_FAIL_TIMEOUT_MS = 10;
 
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
 	private static readonly byte[] s_emptyPayload = [];
@@ -28,6 +29,8 @@ public class Controller
 	private static readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> s_pendingHooks = new();
 	private static readonly ConcurrentDictionary<uint, byte> s_sequenceCounters = new(); // Key: Packed hook ID, Value: Sequence counter
 	private static readonly ObjectPool<PendingRequest<byte[]>> s_pendingRequestPool = new(maxSize: 128);
+
+	private static FrameworkDriver? s_frameworkDriver = null;
 
 	private static Endpoint? s_outgoingEndpoint = null;
 	private static Endpoint? s_incomingEndpoint = null;
@@ -89,6 +92,55 @@ public class Controller
 			}
 
 			return pending.TryGetResult(out byte[]? result) ? result ?? [] : [];
+		}
+		finally
+		{
+			s_pendingHooks.TryRemove(msgId, out _);
+			pending.Reset();
+			s_pendingRequestPool.Return(pending);
+		}
+	}
+
+	/// <summary>
+	/// Sends a framework tick handle request to the host application and waits for a response.
+	/// </summary>
+	/// <returns>
+	/// True if if the framework should continue propagating tick detours; false otherwise.
+	/// </returns>
+	[RequiresDynamicCode("MarshalUtils.Serialize requires dynamic code")]
+	public static bool SendFrameworkRequest()
+	{
+		if (!s_running || s_outgoingEndpoint == null)
+			return false;
+
+		uint msgId = HookMessageId.FRAMEWORK_SYSTEM_ID;
+
+		var pending = s_pendingRequestPool.Get();
+		if (!s_pendingHooks.TryAdd(msgId, pending))
+		{
+			s_pendingRequestPool.Return(pending);
+			return false;
+		}
+
+		try
+		{
+			var data = new FrameworkMessageData { Type = FrameworkMessageType.TickSyncRequest };
+			byte[] payload = MarshalUtils.Serialize(data);
+			var header = new MessageHeader(msgId, PayloadType.Request, (ulong)payload.Length);
+
+			if (!s_outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS))
+			{
+				Log.Warning("Failed to send framework tick sync request.");
+				return false;
+			}
+
+			if (!pending.Wait(IPC_FAST_FAIL_TIMEOUT_MS))
+				return false;
+
+			if (pending.TryGetResult(out byte[]? result) && result != null && result.Length > 0)
+				return result[0] != 0;
+
+			return false;
 		}
 		finally
 		{
@@ -235,6 +287,8 @@ public class Controller
 	{
 		Log.Information("Running shutdown sequence...");
 		HookRegistry.Instance.UnregisterAll();
+		s_frameworkDriver?.Dispose();
+		s_frameworkDriver = null;
 		s_watchdogTimer?.Dispose();
 		s_outgoingEndpoint?.Dispose();
 		s_outgoingEndpoint = null;
@@ -271,11 +325,18 @@ public class Controller
 				switch (header.Type)
 				{
 					case PayloadType.Request:
-						HandleWrapperInvoke(header.Id, payload);
+						if (HookMessageId.GetHookId(header.Id) != HookMessageId.FRAMEWORK_SYSTEM_ID)
+						{
+							HandleWrapperInvoke(header.Id, payload);
+						}
+						else
+						{
+							HandleFrameworkCommand(header.Id, payload);
+						}
 						break;
 
 					case PayloadType.Blob:
-						HandleInterceptResponse(header.Id, payload);
+						HandleHookResponse(header.Id, payload);
 						break;
 
 					case PayloadType.Bye:
@@ -324,19 +385,50 @@ public class Controller
 			return;
 		}
 
-		var registerPayload = MemoryMarshal.Read<HookRegistrationData>(data);
-		string delegateKey = registerPayload.GetKey();
-		uint hookId = HookRegistry.Instance.RegisterHook(registerPayload);
+		var regPayload = MemoryMarshal.Read<HookRegistrationData>(data);
 
-		if (hookId != 0)
+		if (regPayload.HookType == HookType.System)
 		{
-			byte[] payload = BitConverter.GetBytes(hookId);
-			var header = new MessageHeader(requestId, PayloadType.Ack, (ulong)payload.Length);
-			s_outgoingEndpoint?.Write(header, payload, IPC_TIMEOUT_MS);
+			// Handle system hook registration
+			try
+			{
+				if (regPayload.HookId == HookMessageId.FRAMEWORK_SYSTEM_ID)
+				{
+					s_frameworkDriver?.Dispose();
+					s_frameworkDriver = new FrameworkDriver(regPayload.Address);
+					Log.Information($"Framework driver registered at 0x{regPayload.Address:X}");
+					byte[] payload = BitConverter.GetBytes(HookMessageId.FRAMEWORK_SYSTEM_ID);
+					var header = new MessageHeader(requestId, PayloadType.Ack, (ulong)payload.Length);
+					s_outgoingEndpoint?.Write(header, payload, IPC_TIMEOUT_MS);
+				}
+				else
+				{
+					Log.Warning($"Unknown system hook ID: {regPayload.HookId}. Failed registration.");
+					SendResponse(requestId, PayloadType.NAck);
+				}
+			}
+			catch (Exception ex)
+			{
+				Log.Error(ex, $"Failed to register system hook with request ID {requestId}.");
+				SendResponse(requestId, PayloadType.NAck);
+			}
 		}
 		else
 		{
-			SendResponse(requestId, PayloadType.NAck);
+			// Handle standard hook registration
+			string delegateKey = regPayload.GetKey();
+			uint hookId = HookRegistry.Instance.RegisterHook(regPayload);
+
+			if (hookId != 0)
+			{
+				byte[] payload = BitConverter.GetBytes(hookId);
+				var header = new MessageHeader(requestId, PayloadType.Ack, (ulong)payload.Length);
+				s_outgoingEndpoint?.Write(header, payload, IPC_TIMEOUT_MS);
+			}
+			else
+			{
+				SendResponse(requestId, PayloadType.NAck);
+			}
 		}
 	}
 
@@ -400,7 +492,7 @@ public class Controller
 		}
 	}
 
-	private static void HandleInterceptResponse(uint msgId, ReadOnlySpan<byte> data)
+	private static void HandleHookResponse(uint msgId, ReadOnlySpan<byte> data)
 	{
 		if (s_pendingHooks.TryGetValue(msgId, out var pending))
 		{
@@ -408,8 +500,35 @@ public class Controller
 		}
 		else
 		{
-			Log.Warning($"Received response for unknown request: {msgId:X8}");
+			Log.Warning($"Received response for unknown request: 0x{msgId:X8}");
 		}
+	}
+
+	private static void HandleFrameworkCommand(uint msgId, ReadOnlySpan<byte> payload)
+	{
+		if (payload.Length < Unsafe.SizeOf<FrameworkMessageData>())
+		{
+			SendResponse(msgId, PayloadType.NAck);
+			return;
+		}
+
+		var msg = MemoryMarshal.Read<FrameworkMessageData>(payload);
+
+		if (msg.Type == FrameworkMessageType.EnableTickSync)
+		{
+			if (s_frameworkDriver != null)
+			{
+				s_frameworkDriver.IsSyncEnabled = true;
+				SendResponse(msgId, PayloadType.Ack);
+				return;
+			}
+		}
+		else
+		{
+			Log.Warning($"Unhandled framework command: {msg.Type}");
+		}
+
+		SendResponse(msgId, PayloadType.NAck);
 	}
 
 	private static void HandleGoodbyeMessage(uint msgId)
