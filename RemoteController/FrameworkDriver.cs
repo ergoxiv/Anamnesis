@@ -7,6 +7,7 @@ using Reloaded.Hooks;
 using Reloaded.Hooks.Definitions;
 using RemoteController.Interop.Delegates;
 using Serilog;
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 
 /// <summary>
@@ -17,9 +18,13 @@ using System.Diagnostics.CodeAnalysis;
 [RequiresDynamicCode("This class requires dynamic code due to hook reflection")]
 public class FrameworkDriver : IDisposable
 {
+	private static readonly ConcurrentQueue<WorkItem> s_marshaledWork = new();
+
 	private readonly IHook<Framework.Tick> tickHook;
 	private bool disposedValue = false;
 	private bool isSyncEnabled = false;
+	private int requestVersion = 0;
+	private long tickCounter = 0;
 
 	/// <summary>
 	/// Initializes a new instance of the <see cref="FrameworkDriver"/> class.
@@ -43,7 +48,39 @@ public class FrameworkDriver : IDisposable
 	public bool IsSyncEnabled
 	{
 		get => Volatile.Read(ref this.isSyncEnabled);
-		set => Interlocked.Exchange(ref this.isSyncEnabled, value);
+		set
+		{
+			if (value)
+			{
+				Interlocked.Increment(ref this.requestVersion);
+			}
+
+			Interlocked.Exchange(ref this.isSyncEnabled, value);
+		}
+	}
+
+	public static byte[] EnqueueAndWait(Func<byte[]> func, int timeoutMs = 2000)
+	{
+		using var completion = new ManualResetEventSlim(false);
+		byte[]? result = null;
+		Exception? capturedEx = null;
+
+		s_marshaledWork.Enqueue(new WorkItem
+		{
+			Action = () => {
+				try { result = func(); }
+				catch (Exception ex) { capturedEx = ex; }
+			},
+			Completion = completion
+		});
+
+		if (completion.Wait(timeoutMs))
+		{
+			if (capturedEx != null) throw capturedEx;
+			return result ?? [];
+		}
+
+		throw new TimeoutException("Framework thread did not process wrapper invoke request within timeout.");
 	}
 
 	/// <inheritdoc/>
@@ -55,13 +92,36 @@ public class FrameworkDriver : IDisposable
 
 	private byte DetourTick(nint fPtr)
 	{
+		byte result = this.tickHook!.OriginalFunction(fPtr);
+
+		this.tickCounter++;
+
+		if (this.tickCounter % 1000 == 0)
+		{
+			Log.Debug("Framework tick #{TickCount}", this.tickCounter);
+		}
+
+		while (s_marshaledWork.TryDequeue(out var work))
+		{
+			try { work.Action(); }
+			finally { work.Completion.Set(); }
+		}
+
 		// FAST EXIT: If there's no pending work, run the original function directly
-		if (!this.isSyncEnabled)
-			return this.tickHook!.OriginalFunction(fPtr);
+		if (!Volatile.Read(ref this.isSyncEnabled))
+			return result;
+
+		long measuredTime = 0;
+		int versionBefore = Volatile.Read(ref this.requestVersion);
+		bool continueProcessing = false;
 
 		try
 		{
-			this.isSyncEnabled = Controller.SendFrameworkRequest();
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+			continueProcessing = Controller.SendFrameworkRequest();
+			sw.Stop();
+			measuredTime = sw.ElapsedTicks * 1_000_000 / System.Diagnostics.Stopwatch.Frequency;
+			Log.Information("Framework sync completed in {ElapsedMicroseconds} µs.", measuredTime);
 		}
 		catch (Exception ex)
 		{
@@ -69,7 +129,16 @@ public class FrameworkDriver : IDisposable
 			this.isSyncEnabled = false;
 		}
 
-		return this.tickHook!.OriginalFunction(fPtr);
+		if (!continueProcessing)
+		{
+			int versionAfter = Volatile.Read(ref this.requestVersion);
+			if (versionBefore == versionAfter)
+			{
+				Interlocked.Exchange(ref this.isSyncEnabled, false);
+			}
+		}
+
+		return result;
 	}
 
 	private void Dispose(bool disposing)
@@ -87,5 +156,11 @@ public class FrameworkDriver : IDisposable
 
 			this.disposedValue = true;
 		}
+	}
+
+	private struct WorkItem
+	{
+		public Action Action;
+		public ManualResetEventSlim Completion;
 	}
 }

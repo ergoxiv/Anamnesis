@@ -6,6 +6,22 @@ namespace RemoteController.Interop;
 using System;
 
 /// <summary>
+/// An enum that specifies the dispatch mode for function wrappers.
+/// </summary>
+public enum DispatchMode : byte
+{
+	/// <summary>
+	/// Executes the wrapper immediately as a detached thread call.
+	/// </summary>
+	Immediate = 0,
+
+	/// <summary>
+	/// Executes the wrapper on the next framework tick.
+	/// </summary>
+	FrameworkTick = 1,
+}
+
+/// <summary>
 /// An enum that specifies the invocation behavior of a function hook.
 /// </summary>
 public enum HookBehavior

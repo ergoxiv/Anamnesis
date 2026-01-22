@@ -133,7 +133,7 @@ public partial class DeveloperTab : UserControl
 				counter++;
 				return counter >= targetTicks;
 			},
-			() =>
+			action: () =>
 			{
 				Log.Information("Framework Conditional Task Executed");
 			});

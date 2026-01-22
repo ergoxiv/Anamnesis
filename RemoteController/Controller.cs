@@ -113,7 +113,8 @@ public class Controller
 		if (!s_running || s_outgoingEndpoint == null)
 			return false;
 
-		uint msgId = HookMessageId.FRAMEWORK_SYSTEM_ID;
+		byte seq = GetNextSequence(HookMessageId.FRAMEWORK_SYSTEM_ID);
+		uint msgId = HookMessageId.Pack(HookMessageId.FRAMEWORK_SYSTEM_ID, seq);
 
 		var pending = s_pendingRequestPool.Get();
 		if (!s_pendingHooks.TryAdd(msgId, pending))
@@ -451,33 +452,40 @@ public class Controller
 	[RequiresDynamicCode("HookRegistry requires dynamic code")]
 	private static void HandleWrapperInvoke(uint msgId, ReadOnlySpan<byte> argsPayload)
 	{
-		int payloadLength = argsPayload.Length;
-		byte[] args = s_bufferPool.Rent(payloadLength);
-		argsPayload.CopyTo(args);
+		DispatchMode mode = (DispatchMode)argsPayload[0];
+		var actualArgs = argsPayload[1..];
+
+		int payloadLength = actualArgs.Length;
+		byte[] rentedBuffer = s_bufferPool.Rent(payloadLength);
+		actualArgs.CopyTo(rentedBuffer);
+
+		Func<byte[]> executionLogic = () =>
+		{
+			return HookRegistry.Instance.InvokeOriginal(
+				HookMessageId.GetHookId(msgId),
+				rentedBuffer.AsSpan(0, payloadLength));
+		};
 
 		// Execute on thread pool to not block the incoming message processing loop
-		ThreadPool.UnsafeQueueUserWorkItem(
-			static state =>
+		ThreadPool.UnsafeQueueUserWorkItem(state =>
 			{
 				try
 				{
-					byte[] result = HookRegistry.Instance.InvokeOriginal(
-						state.HookIndex,
-						state.Args.AsSpan(0, state.ArgsLength));
-					SendWrapperResult(state.MsgId, result);
+					byte[] result = (mode == DispatchMode.FrameworkTick) ?
+						FrameworkDriver.EnqueueAndWait(executionLogic) : executionLogic();
+
+					SendWrapperResult(msgId, result);
 				}
 				catch (Exception ex)
 				{
-					Log.Error(ex, $"Error invoking wrapper hook[ID: {state.HookIndex}].");
-					SendWrapperResult(state.MsgId, []);
+					Log.Error(ex, $"Error invoking hook[ID: {HookMessageId.GetHookId(msgId)}] in mode {mode}.");
+					SendWrapperResult(msgId, []);
 				}
 				finally
 				{
-					s_bufferPool.Return(state.Args);
+					s_bufferPool.Return(rentedBuffer);
 				}
-			},
-			new HookWorkItem(HookMessageId.GetHookId(msgId), args, msgId, payloadLength),
-			true);
+			}, null);
 	}
 
 	private static void SendWrapperResult(uint msgId, byte[] resultPayload)
@@ -518,6 +526,7 @@ public class Controller
 		{
 			if (s_frameworkDriver != null)
 			{
+				Log.Debug("Enabling framework tick synchronization as per host request.");
 				s_frameworkDriver.IsSyncEnabled = true;
 				SendResponse(msgId, PayloadType.Ack);
 				return;

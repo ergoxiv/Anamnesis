@@ -31,6 +31,21 @@ public static class Framework
 	public delegate void RenderGraphics(long a1);
 }
 
+public static class GameObject
+{
+	[FunctionBind("0F B6 81 ?? ?? ?? ?? 84 C0 78 2F")]
+	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
+	public delegate byte EnableDraw(nint objPtr);
+
+	[FunctionBind("40 53 48 83 EC 20 80 B9 ?? ?? ?? ?? ?? 48 8B D9 7D 1F")]
+	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
+	public delegate long DisableDraw(nint objPtr);
+
+	[FunctionBind("E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 17 45 33 C9")]
+	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
+	public delegate byte IsReadyToDraw(nint objPtr);
+}
+
 public static class GameMain
 {
 	[FunctionBind("E8 ?? ?? ?? ?? 83 7F ?? ?? 4C 8D 3D")]

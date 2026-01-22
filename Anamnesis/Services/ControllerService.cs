@@ -17,6 +17,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -192,6 +193,10 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <param name="handle">
 	/// The handle of the registered hook.
 	/// </param>
+	/// <param name="mode">
+	/// The context in which to dispatch the hook invocation.
+	/// See <see cref="DispatchMode"/> for more details.
+	/// </param>
 	/// <param name="timeoutMs">
 	/// The timeout in milliseconds for the invocation to return.
 	/// </param>
@@ -205,7 +210,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <exception cref="ArgumentException">
 	/// Thrown if the provided hook handle is invalid.
 	/// </exception>
-	public TResult? InvokeHook<TResult>(HookHandle handle, int timeoutMs = IPC_TIMEOUT_MS, params object[] args)
+	public TResult? InvokeHook<TResult>(HookHandle handle, DispatchMode mode = DispatchMode.Immediate, int timeoutMs = IPC_TIMEOUT_MS, params object[] args)
 		where TResult : unmanaged
 	{
 		if (handle == null || !handle.IsValid)
@@ -216,7 +221,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		{
 			Span<byte> buffer = stackalloc byte[size];
 			MarshalUtils.SerializeArgs(buffer, args);
-			return this.InvokeHook<TResult>(handle.HookId, buffer, timeoutMs);
+			return this.InvokeHook<TResult>(handle.HookId, buffer, mode, timeoutMs);
 		}
 		else
 		{
@@ -225,7 +230,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			{
 				Span<byte> buffer = poolBuffer.AsSpan(0, size);
 				MarshalUtils.SerializeArgs(buffer, args);
-				return this.InvokeHook<TResult>(handle.HookId, buffer, timeoutMs);
+				return this.InvokeHook<TResult>(handle.HookId, buffer, mode, timeoutMs);
 			}
 			finally
 			{
@@ -245,6 +250,10 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <param name="argsPayload">
 	/// The timeout in milliseconds for the invocation to return.
 	/// </param>
+	/// <param name="mode">
+	/// The context in which to dispatch the hook invocation.
+	/// See <see cref="DispatchMode"/> for more details.
+	/// </param>
 	/// <param name="timeoutMs">
 	/// The serialized arguments to pass to the hooked function.
 	/// </param>
@@ -255,7 +264,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <exception cref="ArgumentException">
 	/// Thrown if the provided hook handle is invalid.
 	/// </exception>
-	public TResult? InvokeHook<TResult>(uint hookId, ReadOnlySpan<byte> argsPayload, int timeoutMs = IPC_TIMEOUT_MS)
+	public TResult? InvokeHook<TResult>(uint hookId, ReadOnlySpan<byte> argsPayload, DispatchMode mode = DispatchMode.Immediate, int timeoutMs = IPC_TIMEOUT_MS)
 		where TResult : unmanaged
 	{
 		if (this.outgoingEndpoint == null)
@@ -273,12 +282,17 @@ public class ControllerService : ServiceBase<ControllerService>
 		var pending = this.wrapperRequestPool.Get();
 		this.pendingHookRequests[msgId] = pending;
 
+		int argsLength = argsPayload.Length + 1;
+		Span<byte> packedPayload = stackalloc byte[argsLength];
+		packedPayload[0] = (byte)mode;
+		argsPayload.CopyTo(packedPayload[1..]);
+
 		try
 		{
-			var header = new MessageHeader(msgId, PayloadType.Request, (ulong)argsPayload.Length);
+			var header = new MessageHeader(msgId, PayloadType.Request, (ulong)argsLength);
 			try
 			{
-				if (!this.outgoingEndpoint.Write(header, argsPayload, IPC_TIMEOUT_MS))
+				if (!this.outgoingEndpoint.Write(header, packedPayload, IPC_TIMEOUT_MS))
 				{
 					Log.Warning($"Hook[ID: {hookId}] invocation failed to send.");
 					return default;
@@ -381,7 +395,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// </remarks>
 	public bool UnregisterHook(HookHandle handle, int timeoutMs = IPC_TIMEOUT_MS)
 	{
-		if (!handle.IsValid)
+		if (!handle.IsValid || !this.isConnected)
 			return false;
 
 		return this.UnregisterHookById(handle.HookId, timeoutMs);
@@ -389,6 +403,9 @@ public class ControllerService : ServiceBase<ControllerService>
 
 	internal void UnregisterHookInternal(uint hookId)
 	{
+		if (!this.isConnected)
+			return;
+
 		this.UnregisterHookById(hookId, IPC_TIMEOUT_MS);
 	}
 
@@ -1057,7 +1074,8 @@ public class ControllerService : ServiceBase<ControllerService>
 		byte[] payload = MarshalUtils.Serialize(data);
 		var header = new MessageHeader(HookMessageId.FRAMEWORK_SYSTEM_ID, PayloadType.Request, (ulong)payload.Length);
 
-		uint msgId = header.Id;
+		byte seq = this.GetNextSequence(HookMessageId.FRAMEWORK_SYSTEM_ID);
+		uint msgId = HookMessageId.Pack(HookMessageId.FRAMEWORK_SYSTEM_ID, seq);
 		var pending = new PendingRequest<byte[]>();
 		this.pendingHookRequests[msgId] = pending;
 
@@ -1093,6 +1111,10 @@ public class ControllerService : ServiceBase<ControllerService>
 		else
 			Log.Warning("No acknowledgment received for shutdown message.");
 
+		// Regardless of the result, mark as disconnected
+		// This will avoid hooks from attempting to use the IPC during disposal
+		this.isConnected = false;
+
 		if (this.pendingByeMessage.TryGetResult(out bool success) && success)
 			Log.Information("Remote controller shutdown completed successfully.");
 		else
@@ -1114,8 +1136,9 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 	private readonly Lock queueLock = new();
 	private readonly Action sendSyncRequest = sendSyncRequest;
 
-	private int loopState = 0; // 0 = Idle, 1 = Active
 	private bool active = false;
+
+	private Header header;
 
 	public bool Active
 	{
@@ -1139,9 +1162,9 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 		}
 
 		var task = this.workQueue.Enqueue(action);
-		if (Interlocked.CompareExchange(ref this.loopState, 1, 0) == 0)
+		lock (this.queueLock)
 		{
-			this.sendSyncRequest();
+			this.EnsureLoopStarted();
 		}
 
 		return task;
@@ -1150,6 +1173,15 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 	/// <summary>
 	/// Delays execution for a specific time, then runs on framework tick.
 	/// </summary>
+	/// <param name="delay">
+	/// A time span to wait before executing the action.
+	/// </param>
+	/// <param name="action">
+	/// The action to execute after the delay.
+	/// </param>
+	/// <returns>
+	/// A task that completes once the action has been executed.
+	/// </returns>
 	public async Task RunOnTick(TimeSpan delay, Action action)
 	{
 		if (!this.Active)
@@ -1164,15 +1196,15 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 	}
 
 	/// <summary>
-	/// Executes an action within the context of the framework tick
-	/// once the provided condition evaluates to true.
+	/// Runs an action after a specific number of framework ticks have passed.
 	/// </summary>
-	/// <remarks>
-	/// The framework service will check the condition on each tick until
-	/// it evaluates to true. Ensure that the condition will eventually be
-	/// met to avoid indefinite tick processing.
-	/// </remarks>
-	public void RunOnTickUntil(Func<bool> condition, Action action)
+	/// <param name="ticks">
+	/// The number of framework ticks to wait before executing the action.
+	/// </param>
+	/// <param name="action">
+	/// The action to execute after the specified number of ticks.
+	/// </param>
+	public void RunAfterTicks(int ticks, Action action)
 	{
 		if (!this.Active)
 		{
@@ -1182,13 +1214,130 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 
 		lock (this.queueLock)
 		{
-			this.conditionalTasks.Add(new ConditionalTask(condition, action));
+			long currentTick = this.header.TickCount;
+			long targetTick = currentTick + ticks;
+			this.conditionalTasks.Add(
+				new ConditionalTask(
+					Condition: () => true, // Always true, so action runs as soon as tick is reached
+					Action: action,
+					TriggerTick: targetTick,
+					EnqueueTick: currentTick,
+					TimeoutFrames: -1));
+			this.EnsureLoopStarted();
+		}
+	}
+
+	/// <summary>
+	/// Executes an action within the context of the framework tick
+	/// once the provided condition evaluates to true.
+	/// </summary>
+	/// <param name="condition">
+	/// The condition to evaluate on each tick.
+	/// </param>
+	/// <param name="deferTicks">
+	/// The number of framework ticks to wait before checking the
+	/// condition and running the action.
+	/// </param>
+	/// <param name="timeoutTicks">
+	/// The maximum number of framework ticks to run the condition check
+	/// for before giving up.
+	/// </param>
+	/// <param name="action">
+	/// The action to execute once the condition is met.
+	/// </param>
+	/// <remarks>
+	/// The framework service will check the condition on each tick until
+	/// it evaluates to true. Ensure that the condition will eventually be
+	/// met to avoid indefinite tick processing.
+	/// </remarks>
+	public void RunOnTickUntil(Func<bool> condition, int deferTicks = 0, int timeoutTicks = -1, Action? action = null)
+	{
+		if (!this.Active)
+		{
+			Log.Warning("The framework service is inactive. Dropping action.");
+			return;
 		}
 
-		if (Interlocked.CompareExchange(ref this.loopState, 1, 0) == 0)
+		lock (this.queueLock)
 		{
+			long currentTick = this.header.TickCount;
+			long targetTick = currentTick + deferTicks;
+			this.conditionalTasks.Add(new ConditionalTask(condition, action ?? (() => { }), targetTick, currentTick, timeoutTicks));
+			this.EnsureLoopStarted();
+		}
+	}
+
+	/// <summary>
+	/// Executes an action within the context of the framework tick
+	/// once the provided condition evaluates to true.
+	/// </summary>
+	/// <param name="condition">
+	/// The condition to evaluate on each tick.
+	/// </param>
+	/// <param name="deferTicks">
+	/// The number of framework ticks to wait before checking the
+	/// condition and running the action.
+	/// </param>
+	/// <param name="timeoutTicks">
+	/// The maximum number of framework ticks to run the condition check
+	/// for before giving up.
+	/// </param>
+	/// <param name="action">
+	/// The action to execute once the condition is met.
+	/// </param>
+	/// <returns>
+	/// A task that completes once the action has been executed.
+	/// </returns>
+	/// <remarks>
+	/// This is a variant of <see cref="RunOnTickUntil(Func{bool}, int, int, Action)"/>
+	/// that provides a <see cref="Task"/> to await completion.
+	/// </remarks>
+	public Task RunOnTickUntilAsync(Func<bool> condition, int deferTicks = 0, int timeoutTicks = -1, Action? action = null)
+	{
+		if (!this.Active)
+		{
+			Log.Warning("The framework service is inactive. Dropping action.");
+			return Task.CompletedTask;
+		}
+
+		TaskCompletionSource tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		lock (this.queueLock)
+		{
+			long currentTick = this.header.TickCount;
+			long targetTick = currentTick + deferTicks;
+			this.conditionalTasks.Add(
+				new ConditionalTask(
+					condition,
+					() =>
+					{
+						try
+						{
+							action?.Invoke();
+							tcs.TrySetResult();
+						}
+						catch (Exception ex)
+						{
+							tcs.TrySetException(ex);
+						}
+					},
+					targetTick,
+					currentTick,
+					timeoutTicks,
+					tcs));
+		}
+
+		if (Interlocked.CompareExchange(ref this.header.LoopState, 1, 0) == 0)
+		{
+			Log.Debug("Starting framework tick loop for conditional task.");
 			this.sendSyncRequest();
 		}
+		else
+		{
+			Log.Debug("Framework tick loop already active. Conditional task queued.");
+		}
+
+		return tcs.Task;
 	}
 
 	/// <summary>
@@ -1202,15 +1351,25 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 	/// </remarks>
 	internal bool ProcessTick()
 	{
+		this.header.TickCount++;
 		bool remainingWork = false;
 
 		lock (this.queueLock)
 		{
+			if (this.conditionalTasks.Count > 0)
+				Log.Debug($"[ProcessTick] {this.conditionalTasks.Count} tasks in queue. Tick: {this.header.TickCount}");
+
 			for (int i = this.conditionalTasks.Count - 1; i >= 0; i--)
 			{
 				var task = this.conditionalTasks[i];
-				bool isReady = false;
 
+				if (this.header.TickCount - task.TriggerTick < 0)
+				{
+					remainingWork = true;
+					continue;
+				}
+
+				bool isReady = false;
 				try
 				{
 					isReady = task.Condition();
@@ -1220,12 +1379,17 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 					// NOTE: All tasks and conditional should have inner error handling.
 					// This is in place just to inform of any uncaught errors.
 					Log.Error(ex, $"Error evaluating conditional task in framework service.");
+					task.Tcs?.TrySetException(ex);
+					this.conditionalTasks.RemoveAt(i);
+					continue;
 				}
 
 				if (isReady)
 				{
+					this.conditionalTasks.RemoveAt(i);
 					try
 					{
+						Log.Information($"[ProcessTick] Condition MET for task. Executing action.");
 						task.Action();
 					}
 					catch (Exception ex)
@@ -1233,34 +1397,60 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 						Log.Error(ex, $"Error executing action task in framework service.");
 					}
 
-					this.conditionalTasks.RemoveAt(i);
+					continue;
 				}
+
+				if (task.TimeoutFrames >= 0 && (this.header.TickCount - task.EnqueueTick) >= task.TimeoutFrames)
+				{
+					Log.Warning($"[ProcessTick] Task TIMEOUT reached. Enqueued: {task.EnqueueTick}, Current: {this.header.TickCount}, Max: {task.TimeoutFrames}");
+
+					// Timeout reached, remove task
+					bool signaled = task.Tcs?.TrySetCanceled() ?? false;
+
+					Log.Debug($"[ProcessTick] TCS Cancellation signaled: {signaled}");
+					this.conditionalTasks.RemoveAt(i);
+					continue;
+				}
+
+				remainingWork = true;
 			}
 
 			// If we still have conditions to check, keep syncing with framework tick
-			remainingWork = this.conditionalTasks.Count > 0;
+			remainingWork |= this.conditionalTasks.Count > 0;
 		}
 
 		remainingWork |= this.workQueue.ProcessPending(s_frameBudget);
 
-		if (!remainingWork)
-		{
-			Interlocked.Exchange(ref this.loopState, 0);
+		if (remainingWork)
+			return true;
 
-			// Double-check after setting to idle to make sure no work was enqueued
-			// After processing pending tasks in the queue and before setting the
-			// internal loop state to idle.
-			if (!this.workQueue.IsEmpty || this.conditionalTasks.Count > 0)
+		lock (this.queueLock)
+		{
+			if (this.conditionalTasks.Count == 0 && this.workQueue.IsEmpty)
 			{
-				if (Interlocked.CompareExchange(ref this.loopState, 1, 0) == 0)
-					return true;
+				Interlocked.Exchange(ref this.header.LoopState, 0);
+				return false;
 			}
 
-			return false;
+			return true;
 		}
-
-		return true;
 	}
 
-	private record struct ConditionalTask(Func<bool> Condition, Action Action);
+	private void EnsureLoopStarted()
+	{
+		if (Interlocked.CompareExchange(ref this.header.LoopState, 1, 0) == 0)
+		{
+			Log.Debug("Starting framework tick loop.");
+			this.sendSyncRequest();
+		}
+	}
+
+	[StructLayout(LayoutKind.Explicit)]
+	private struct Header
+	{
+		[FieldOffset(0)] public long TickCount;
+		[FieldOffset(64)] public int LoopState; // 0 = Idle, 1 = Active
+	}
+
+	private record struct ConditionalTask(Func<bool> Condition, Action Action, long TriggerTick, long EnqueueTick, int TimeoutFrames, TaskCompletionSource? Tcs = null);
 }
