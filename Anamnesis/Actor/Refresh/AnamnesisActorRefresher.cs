@@ -38,8 +38,10 @@ public class AnamnesisActorRefresher : IActorRefresher
 		if (handle == null)
 			return;
 
-		if (SettingsService.Current.EnableNpcHack && actor.ObjectKind == ActorTypes.Player)
+		var isInGpose = GposeService.IsInGpose() ?? GposeService.Instance.IsGpose;
+		if (SettingsService.Current.EnableNpcHack && isInGpose && actor.ObjectKind == ActorTypes.Player)
 		{
+			// NOTE: This workaround is necessary only when we're in the overworld
 			actor.ObjectKind = ActorTypes.EventNpc;
 			await this.RedrawService.Redraw(handle);
 			actor.ObjectKind = ActorTypes.Player;
