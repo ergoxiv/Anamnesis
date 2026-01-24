@@ -36,12 +36,15 @@ public static class HookUtils
 /// </remarks>
 public static class HookMessageId
 {
-	public const uint MAX_STANDARD_HOOK_ID = 0x00FFFFFF - SYSTEM_HOOK_COUNT - 1;
-
-	// Reserved hook identifiers for system hooks
-	public const uint SYSTEM_HOOK_COUNT = 1;
-	public const uint FRAMEWORK_SYSTEM_ID = MAX_STANDARD_HOOK_ID + 1;
 	public const uint MAX_HOOK_ID = 0x00FFFFFF;
+
+	// Special hook identifiers
+	public const int SPECIAL_HOOK_COUNT = 2;
+	public const uint FRAMEWORK_SYSTEM_ID = MAX_HOOK_ID - 1;
+	public const uint BATCH_HOOK_ID = FRAMEWORK_SYSTEM_ID - 1;
+
+	// Maximum hook identifier for non-specialized hooks.
+	public const uint MAX_STANDARD_HOOK_ID = MAX_HOOK_ID - SPECIAL_HOOK_COUNT - 1;
 
 	/// <summary>
 	/// Combines the hook identifier and message sequence number into a single packed identifier.

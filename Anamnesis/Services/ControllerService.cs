@@ -22,6 +22,14 @@ using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>
+/// An interface for batch result placeholders.
+/// </summary>
+public interface IBatchResult
+{
+	void SetResult(ReadOnlySpan<byte> data);
+}
+
+/// <summary>
 /// Represents a handle to a registered hook.
 /// Returned upon hook registration via <see cref="ControllerService"/>.
 /// </summary>
@@ -94,24 +102,227 @@ public sealed class HookHandle : IDisposable
 }
 
 /// <summary>
+/// A placeholder for a batched invocation result.
+/// </summary>
+/// <typeparam name="T">
+/// The expected type of the return value.
+/// </typeparam>
+public class BatchResult<T> : IBatchResult
+	where T : unmanaged
+{
+	public T Value { get; private set; }
+	public bool HasValue { get; private set; }
+
+	public static implicit operator T(BatchResult<T> result) => result.Value;
+
+	public void SetResult(ReadOnlySpan<byte> data)
+	{
+		this.HasValue = true;
+
+		if (data.Length == 0) // void result
+			return;
+
+		if (data.Length < Unsafe.SizeOf<T>())
+		{
+			Log.Warning($"BatchResult<{typeof(T).Name}> data length mismatch. Expected at least {Unsafe.SizeOf<T>()} bytes, got {data.Length} bytes.");
+		}
+
+		this.Value = MarshalUtils.Deserialize<T>(data);
+	}
+}
+
+/// <summary>
+/// A scope for batching multiple hook invocations into a single IPC call.
+/// </summary>
+/// <param name="service">
+/// The controller service used to execute the batch invocation.
+/// </param>
+public class BatchInvokeScope(ControllerService service) : IDisposable
+{
+	private static readonly int s_sizeOfInt = sizeof(int);
+
+	private readonly ControllerService service = service;
+	private readonly ArrayBufferWriter<byte> buffer = new();
+	private readonly List<IBatchResult> results = new();
+	private int hookCount = 0;
+	private bool isDisposed = false;
+
+	public DispatchMode Mode { get; set; } = DispatchMode.Immediate;
+	public int TimeoutMs { get; set; } = ControllerService.IPC_TIMEOUT_MS;
+
+	/// <summary>
+	/// Appends a wrapper hook invocation request to the batch invoke scope.
+	/// </summary>
+	/// <typeparam name="T">
+	/// The return type of the hooked function.
+	/// </typeparam>
+	/// <param name="handle">
+	/// A handle to the registered wrapper hook.
+	/// </param>
+	/// <param name="args">
+	/// The serialized arguments to pass to the hooked function.
+	/// </param>
+	/// <returns>
+	/// A placeholder result via a wrapper <see cref="BatchResult{T}"/> that is
+	/// updated when the batch invocation is executed.
+	/// </returns>
+	public BatchResult<T> AddCall<T>(HookHandle handle, params object[] args)
+		where T : unmanaged
+	{
+		if (!handle.IsValid)
+			throw new ArgumentException("Invalid hook handle.", nameof(handle));
+
+		int size = MarshalUtils.ComputeArgsSize(args);
+		byte[] poolBuffer = ArrayPool<byte>.Shared.Rent(size);
+		try
+		{
+			Span<byte> buffer = poolBuffer.AsSpan(0, size);
+			MarshalUtils.SerializeArgs(buffer, args);
+			return this.AddCall<T>(handle.HookId, buffer);
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(poolBuffer);
+		}
+	}
+
+	/// <summary>
+	/// Appends a wrapper hook invocation request to the batch invoke scope.
+	/// </summary>
+	/// <typeparam name="T">
+	/// The return type of the hooked function.
+	/// </typeparam>
+	/// <param name="hookId">
+	/// The identifier of the registered wrapper hook.
+	/// </param>
+	/// <param name="args">
+	/// The serialized arguments to pass to the hooked function.
+	/// </param>
+	/// <returns>
+	/// A placeholder result via a wrapper <see cref="BatchResult{T}"/> that is
+	/// updated when the batch invocation is executed.
+	/// </returns>
+	public BatchResult<T> AddCall<T>(uint hookId, ReadOnlySpan<byte> args)
+		where T : unmanaged
+	{
+		this.hookCount++;
+
+		// Pack hook identifier
+		Span<byte> hookIdSpan = this.buffer.GetSpan(s_sizeOfInt);
+		MarshalUtils.WriteToSpan(hookIdSpan, hookId);
+		this.buffer.Advance(s_sizeOfInt);
+
+		// Pack payload length
+		Span<byte> lengthSpan = this.buffer.GetSpan(s_sizeOfInt);
+		MarshalUtils.WriteToSpan(lengthSpan, args.Length);
+		this.buffer.Advance(s_sizeOfInt);
+
+		// Pack payload
+		this.buffer.Write(args);
+
+		// Create a result placeholder
+		var result = new BatchResult<T>();
+		this.results.Add(result);
+		return result;
+	}
+
+	/// <summary>
+	/// Appends a wrapper hook invocation request to the batch invoke scope.
+	/// </summary>
+	/// <typeparam name="T">
+	/// The return type of the hooked function.
+	/// </typeparam>
+	/// <param name="handle">
+	/// A handle to the registered wrapper hook.
+	/// </param>
+	/// <param name="args">
+	/// The serialized arguments to pass to the hooked function.
+	/// </param>
+	/// <returns>
+	/// A placeholder result via a wrapper <see cref="BatchResult{T}"/> that is
+	/// updated when the batch invocation is executed.
+	/// </returns>
+	public BatchResult<T> AddCall<T>(HookHandle handle, ReadOnlySpan<byte> args)
+		where T : unmanaged
+	{
+		if (!handle.IsValid)
+			throw new ArgumentException("Invalid hook handle.", nameof(handle));
+
+		return this.AddCall<T>(handle.HookId, args);
+	}
+
+	/// <inheritdoc/>
+	public void Dispose()
+	{
+		if (this.hookCount == 0 || this.isDisposed)
+			return;
+
+		// [Int32 HookCount][(Int32 HookId, Int32 PayloadLength, byte[] Payload),...]
+		ulong totalSize = (ulong)(s_sizeOfInt + this.buffer.WrittenCount);
+		Span<byte> finalBuffer = new byte[totalSize];
+		MarshalUtils.WriteToSpan(finalBuffer[..s_sizeOfInt], this.hookCount);
+		this.buffer.WrittenSpan.CopyTo(finalBuffer[s_sizeOfInt..]);
+
+		byte[]? response = this.service.InvokeHookRaw(HookMessageId.BATCH_HOOK_ID, finalBuffer, this.Mode, this.TimeoutMs);
+
+		try
+		{
+			if (response == null || response.Length == 0)
+			{
+				Log.Warning("Batch invocation failed or returned no response.");
+				return;
+			}
+
+			ReadOnlySpan<byte> responseSpan = response;
+			int offset = 0;
+
+			for (int i = 0; i < this.results.Count; i++)
+			{
+				if (offset + s_sizeOfInt > responseSpan.Length)
+				{
+					Log.Warning($"Batch invocation response size mismatch. Cannot read result length for call {i}.");
+					return;
+				}
+
+				var payloadLength = MarshalUtils.Deserialize<int>(responseSpan.Slice(offset, s_sizeOfInt));
+				var resultPayload = responseSpan.Slice(offset + s_sizeOfInt, payloadLength);
+				this.results[i].SetResult(resultPayload);
+				offset += s_sizeOfInt + payloadLength;
+			}
+		}
+		finally
+		{
+			this.buffer.Clear();
+			ControllerService.ClearActiveBatch();
+			this.isDisposed = true;
+			GC.SuppressFinalize(this);
+		}
+	}
+}
+
+/// <summary>
 /// A service that communicates with the remote controller that we inject into the game process.
 /// The service is responsible for sending and receiving messages to and from the controller, including
 /// watchdog heartbeats, and function hook communication.
 /// </summary>
 public class ControllerService : ServiceBase<ControllerService>
 {
+	internal const int IPC_TIMEOUT_MS = 100;
+
 	private const string BUF_SHMEM_OUTGOING = "Local\\ANAM_SHMEM_MAIN_TO_CTRL";
 	private const string BUF_SHMEM_INCOMING = "Local\\ANAM_SHMEM_CTRL_TO_MAIN";
 	private const uint BUF_BLK_COUNT = 128;
 	private const ulong BUF_BLK_SIZE = 8192;
 
-	private const int IPC_TIMEOUT_MS = 100;
 	private const int IPC_REGISTER_TIMEOUT_MS = 1000;
 	private const int HEARTBEAT_INTERVAL_MS = 15_000;
 	private const int STACKALLOC_THRESHOLD = 255;
 	private const int CONN_CHECK_DELAY_MS = 1000;
 
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
+
+	[ThreadStatic]
+	private static BatchInvokeScope? s_currentBatch;
 
 	private readonly ConcurrentDictionary<string, HookRegistrationInfo> allHooks = new();
 	private readonly ConcurrentQueue<HookRegistrationInfo> registrationQueue = new();
@@ -186,86 +397,33 @@ public class ControllerService : ServiceBase<ControllerService>
 	}
 
 	/// <summary>
-	/// Invokes the registered wrapper hook synchronously.
+	/// Invokes a registered hook synchronously and returns the raw byte result.
 	/// The original function will be called by the remote controller.
 	/// </summary>
-	/// <typeparam name="TResult">The expected return type of the hooked function.</typeparam>
-	/// <param name="handle">
-	/// The handle of the registered hook.
-	/// </param>
-	/// <param name="mode">
-	/// The context in which to dispatch the hook invocation.
-	/// See <see cref="DispatchMode"/> for more details.
-	/// </param>
-	/// <param name="timeoutMs">
-	/// The timeout in milliseconds for the invocation to return.
-	/// </param>
-	/// <param name="args">
-	/// The arguments to pass to the hooked function.
-	/// </param>
-	/// <returns>
-	/// A typed result from the hooked function, or the default value of <c>TResult</c>
-	/// if the invocation failed or timed out.
-	/// </returns>
-	/// <exception cref="ArgumentException">
-	/// Thrown if the provided hook handle is invalid.
-	/// </exception>
-	public TResult? InvokeHook<TResult>(HookHandle handle, DispatchMode mode = DispatchMode.Immediate, int timeoutMs = IPC_TIMEOUT_MS, params object[] args)
-		where TResult : unmanaged
-	{
-		if (handle == null || !handle.IsValid)
-			throw new ArgumentException("Invalid hook handle.", nameof(handle));
-
-		int size = MarshalUtils.ComputeArgsSize(args);
-		if (size <= STACKALLOC_THRESHOLD)
-		{
-			Span<byte> buffer = stackalloc byte[size];
-			MarshalUtils.SerializeArgs(buffer, args);
-			return this.InvokeHook<TResult>(handle.HookId, buffer, mode, timeoutMs);
-		}
-		else
-		{
-			byte[] poolBuffer = ArrayPool<byte>.Shared.Rent(size);
-			try
-			{
-				Span<byte> buffer = poolBuffer.AsSpan(0, size);
-				MarshalUtils.SerializeArgs(buffer, args);
-				return this.InvokeHook<TResult>(handle.HookId, buffer, mode, timeoutMs);
-			}
-			finally
-			{
-				ArrayPool<byte>.Shared.Return(poolBuffer);
-			}
-		}
-	}
-
-	/// <summary>
-	/// Invokes the registered wrapper hook synchronously.
-	/// The original function will be called by the remote controller.
-	/// </summary>
-	/// <typeparam name="TResult">The expected return type of the hooked function.</typeparam>
 	/// <param name="hookId">
 	/// The ID of the registered hook.
 	/// </param>
 	/// <param name="argsPayload">
-	/// The timeout in milliseconds for the invocation to return.
+	/// The serialized arguments to pass to the hooked function.
 	/// </param>
 	/// <param name="mode">
 	/// The context in which to dispatch the hook invocation.
 	/// See <see cref="DispatchMode"/> for more details.
 	/// </param>
 	/// <param name="timeoutMs">
-	/// The serialized arguments to pass to the hooked function.
+	/// The timeout in milliseconds for the invocation to return.
 	/// </param>
 	/// <returns>
-	/// A typed result from the hooked function, or the default value of <c>TResult</c>
-	/// if the invocation failed or timed out.
+	/// The raw byte array result from the hooked function, or <c>null</c> if the invocation failed or timed out.
 	/// </returns>
-	/// <exception cref="ArgumentException">
-	/// Thrown if the provided hook handle is invalid.
+	/// <exception cref="InvalidOperationException">
+	/// Thrown if the controller service is not initialized.
 	/// </exception>
-	public TResult? InvokeHook<TResult>(uint hookId, ReadOnlySpan<byte> argsPayload, DispatchMode mode = DispatchMode.Immediate, int timeoutMs = IPC_TIMEOUT_MS)
-		where TResult : unmanaged
+	/// <remarks>
+	/// This method is intended for advanced scenarios where the caller needs direct access to the raw result bytes.
+	/// For strongly-typed results, use <see cref="InvokeHook{TResult}(uint, ReadOnlySpan{byte}, DispatchMode, int)"/>.
+	/// </remarks>
+	public byte[]? InvokeHookRaw(uint hookId, ReadOnlySpan<byte> argsPayload, DispatchMode mode = DispatchMode.Immediate, int timeoutMs = IPC_TIMEOUT_MS)
 	{
 		if (this.outgoingEndpoint == null)
 			throw new InvalidOperationException("Controller service not initialized.");
@@ -319,7 +477,7 @@ public class ControllerService : ServiceBase<ControllerService>
 				return default;
 			}
 
-			return MarshalUtils.Deserialize<TResult>(result);
+			return result;
 		}
 		finally
 		{
@@ -327,6 +485,140 @@ public class ControllerService : ServiceBase<ControllerService>
 			pending.Reset();
 			this.wrapperRequestPool.Return(pending);
 		}
+	}
+
+	/// <summary>
+	/// Invokes the registered wrapper hook synchronously.
+	/// The original function will be called by the remote controller.
+	/// </summary>
+	/// <typeparam name="TResult">The expected return type of the hooked function.</typeparam>
+	/// <param name="handle">
+	/// The handle of the registered hook.
+	/// </param>
+	/// <param name="mode">
+	/// The context in which to dispatch the hook invocation.
+	/// See <see cref="DispatchMode"/> for more details.
+	/// </param>
+	/// <param name="timeoutMs">
+	/// The timeout in milliseconds for the invocation to return.
+	/// </param>
+	/// <param name="args">
+	/// The arguments to pass to the hooked function.
+	/// </param>
+	/// <returns>
+	/// A typed result from the hooked function, or the default value of <c>TResult</c>
+	/// if the invocation failed or timed out.
+	/// </returns>
+	/// <exception cref="ArgumentException">
+	/// Thrown if the provided hook handle is invalid.
+	/// </exception>
+	public TResult? InvokeHook<TResult>(HookHandle handle, DispatchMode mode = DispatchMode.Immediate, int timeoutMs = IPC_TIMEOUT_MS, params object[] args)
+		where TResult : unmanaged
+	{
+		if (handle == null || !handle.IsValid)
+			throw new ArgumentException("Invalid hook handle.", nameof(handle));
+
+		int size = MarshalUtils.ComputeArgsSize(args);
+		if (size <= STACKALLOC_THRESHOLD)
+		{
+			Span<byte> buffer = stackalloc byte[size];
+			MarshalUtils.SerializeArgs(buffer, args);
+
+			// In this case, the placeholder result is discarded
+			// If you need the result, use AddCall directly.
+			if (s_currentBatch != null)
+			{
+				s_currentBatch.AddCall<TResult>(handle.HookId, buffer);
+				return default;
+			}
+
+			return this.InvokeHook<TResult>(handle.HookId, buffer, mode, timeoutMs);
+		}
+		else
+		{
+			byte[] poolBuffer = ArrayPool<byte>.Shared.Rent(size);
+			try
+			{
+				Span<byte> buffer = poolBuffer.AsSpan(0, size);
+				MarshalUtils.SerializeArgs(buffer, args);
+
+				// In this case, the placeholder result is discarded
+				// If you need the result, use AddCall directly.
+				if (s_currentBatch != null)
+				{
+					s_currentBatch.AddCall<TResult>(handle.HookId, buffer);
+					return default;
+				}
+
+				return this.InvokeHook<TResult>(handle.HookId, buffer, mode, timeoutMs);
+			}
+			finally
+			{
+				ArrayPool<byte>.Shared.Return(poolBuffer);
+			}
+		}
+	}
+
+	/// <summary>
+	/// Invokes the registered wrapper hook synchronously.
+	/// The original function will be called by the remote controller.
+	/// </summary>
+	/// <typeparam name="TResult">
+	/// The expected return type of the hooked function.
+	/// </typeparam>
+	/// <param name="hookId">
+	/// The ID of the registered hook.
+	/// </param>
+	/// <param name="argsPayload">
+	/// The timeout in milliseconds for the invocation to return.
+	/// </param>
+	/// <param name="mode">
+	/// The context in which to dispatch the hook invocation.
+	/// See <see cref="DispatchMode"/> for more details.
+	/// </param>
+	/// <param name="timeoutMs">
+	/// The serialized arguments to pass to the hooked function.
+	/// </param>
+	/// <returns>
+	/// A typed result from the hooked function, or the default value of <c>TResult</c>
+	/// if the invocation failed or timed out.
+	/// </returns>
+	/// <exception cref="ArgumentException">
+	/// Thrown if the provided hook handle is invalid.
+	/// </exception>
+	public TResult? InvokeHook<TResult>(uint hookId, ReadOnlySpan<byte> argsPayload, DispatchMode mode = DispatchMode.Immediate, int timeoutMs = IPC_TIMEOUT_MS)
+		where TResult : unmanaged
+	{
+		// In this case, the placeholder result is discarded
+		// If you need the result, use AddCall directly.
+		if (s_currentBatch != null)
+		{
+			s_currentBatch.AddCall<TResult>(hookId, argsPayload);
+			return default;
+		}
+
+		return MarshalUtils.Deserialize<TResult>(this.InvokeHookRaw(hookId, argsPayload, mode, timeoutMs) ?? []);
+	}
+
+	/// <summary>
+	/// Creates a new batch invoke scope for grouping multiple hook invocations.
+	/// </summary>
+	/// <returns>
+	/// A new <see cref="BatchInvokeScope"/> instance for batching hook invocations.
+	/// </returns>
+	/// <remarks>
+	/// The intent is to use the returned scope within a <c>using</c> statement to ensure proper disposal.
+	/// </remarks>
+	/// <exception cref="InvalidOperationException">
+	/// Thrown if a batch invoke scope is already active on the current thread.
+	/// </exception>
+	public BatchInvokeScope CreateBatchInvoke()
+	{
+		if (s_currentBatch != null)
+			throw new InvalidOperationException("A batch invoke scope is already active on this thread.");
+
+		s_currentBatch = new BatchInvokeScope(this);
+		return s_currentBatch;
 	}
 
 	/// <summary>
@@ -399,6 +691,11 @@ public class ControllerService : ServiceBase<ControllerService>
 			return false;
 
 		return this.UnregisterHookById(handle.HookId, timeoutMs);
+	}
+
+	internal static void ClearActiveBatch()
+	{
+		s_currentBatch = null;
 	}
 
 	internal void UnregisterHookInternal(uint hookId)
@@ -1127,6 +1424,23 @@ public class ControllerService : ServiceBase<ControllerService>
 		Func<ReadOnlySpan<byte>, byte[]>? Handler);
 }
 
+/// <summary>
+/// Initializes a new instance of the <see cref="FrameworkService"/> class.
+/// This service enables the scheduling and synchronously execution of actions
+/// and functions in relation to the game framework's main loop.
+/// </summary>
+/// <remarks>
+/// While the tasks are executed synchronously, they do not run on the
+/// framework thread itself. Avoid the usage of the framework service
+/// for native functions calls that internally use the Thread Local Storage (TLS).
+/// </remarks>
+/// <param name="queue">
+/// The internal work queue used for task processing.
+/// </param>
+/// <param name="sendSyncRequest">
+/// An action to trigger a syncrhonization request with the remote
+/// controller's framework driver.
+/// </param>
 public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 {
 	private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(1);
@@ -1140,6 +1454,9 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 
 	private Header header;
 
+	/// <summary>
+	/// Gets a value indicating whether the framework service is active.
+	/// </summary>
 	public bool Active
 	{
 		get => this.active;
