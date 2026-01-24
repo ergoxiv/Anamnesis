@@ -18,13 +18,15 @@ using System.Diagnostics.CodeAnalysis;
 [RequiresDynamicCode("This class requires dynamic code due to hook reflection")]
 public class FrameworkDriver : IDisposable
 {
+	private const int FRAMEWORK_DEFAULT_TIMEOUT_MS = 1000;
+
 	private static readonly ConcurrentQueue<WorkItem> s_marshaledWork = new();
+	private static readonly ConcurrentBag<WorkItem> s_workItemPool = new();
 
 	private readonly IHook<Framework.Tick> tickHook;
 	private bool disposedValue = false;
-	private bool isSyncEnabled = false;
+	private volatile int isSyncEnabled = 0;
 	private int requestVersion = 0;
-	private long tickCounter = 0;
 
 	/// <summary>
 	/// Initializes a new instance of the <see cref="FrameworkDriver"/> class.
@@ -47,7 +49,7 @@ public class FrameworkDriver : IDisposable
 	/// </remarks>
 	public bool IsSyncEnabled
 	{
-		get => Volatile.Read(ref this.isSyncEnabled);
+		get => this.isSyncEnabled == 1;
 		set
 		{
 			if (value)
@@ -55,32 +57,51 @@ public class FrameworkDriver : IDisposable
 				Interlocked.Increment(ref this.requestVersion);
 			}
 
-			Interlocked.Exchange(ref this.isSyncEnabled, value);
+			Interlocked.Exchange(ref this.isSyncEnabled, value ? 1 : 0);
 		}
 	}
 
-	public static byte[] EnqueueAndWait(Func<byte[]> func, int timeoutMs = 2000)
+	/// <summary>
+	/// Enqueues a work item to be executed on the framework thread
+	/// </summary>
+	/// <param name="func">
+	/// The function to execute on the framework thread.
+	/// </param>
+	/// <param name="timeoutMs">
+	/// The timeout in milliseconds to wait for the work item to complete.
+	/// </param>
+	/// <returns></returns>
+	/// <exception cref="TimeoutException">
+	/// Thrown if the work item does not complete within the specified timeout.
+	/// </exception>
+	public static byte[] EnqueueAndWait(Func<byte[]> func, int timeoutMs = FRAMEWORK_DEFAULT_TIMEOUT_MS)
 	{
-		using var completion = new ManualResetEventSlim(false);
-		byte[]? result = null;
-		Exception? capturedEx = null;
-
-		s_marshaledWork.Enqueue(new WorkItem
+		if (!s_workItemPool.TryTake(out WorkItem? item))
 		{
-			Action = () => {
-				try { result = func(); }
-				catch (Exception ex) { capturedEx = ex; }
-			},
-			Completion = completion
-		});
-
-		if (completion.Wait(timeoutMs))
-		{
-			if (capturedEx != null) throw capturedEx;
-			return result ?? [];
+			item = new WorkItem();
 		}
 
-		throw new TimeoutException("Framework thread did not process wrapper invoke request within timeout.");
+		item.Setup(func);
+
+		try
+		{
+			s_marshaledWork.Enqueue(item);
+
+			if (item.Completion.Wait(timeoutMs))
+			{
+				if (item.CapturedException != null)
+					throw item.CapturedException;
+
+				return item.Result ?? [];
+			}
+
+			throw new TimeoutException("Framework thread did not process wrapper invoke request within timeout.");
+		}
+		finally
+		{
+			item.Reset();
+			s_workItemPool.Add(item);
+		}
 	}
 
 	/// <inheritdoc/>
@@ -92,41 +113,33 @@ public class FrameworkDriver : IDisposable
 
 	private byte DetourTick(nint fPtr)
 	{
-		byte result = this.tickHook!.OriginalFunction(fPtr);
-
-		this.tickCounter++;
-
-		if (this.tickCounter % 1000 == 0)
-		{
-			Log.Debug("Framework tick #{TickCount}", this.tickCounter);
-		}
-
 		while (s_marshaledWork.TryDequeue(out var work))
 		{
-			try { work.Action(); }
-			finally { work.Completion.Set(); }
+			try
+			{
+				work.Execute();
+			}
+			finally
+			{
+				work.Completion.Set();
+			}
 		}
 
 		// FAST EXIT: If there's no pending work, run the original function directly
-		if (!Volatile.Read(ref this.isSyncEnabled))
-			return result;
+		if (this.isSyncEnabled == 0)
+			return this.tickHook!.OriginalFunction(fPtr);
 
-		long measuredTime = 0;
 		int versionBefore = Volatile.Read(ref this.requestVersion);
 		bool continueProcessing = false;
 
 		try
 		{
-			var sw = System.Diagnostics.Stopwatch.StartNew();
 			continueProcessing = Controller.SendFrameworkRequest();
-			sw.Stop();
-			measuredTime = sw.ElapsedTicks * 1_000_000 / System.Diagnostics.Stopwatch.Frequency;
-			Log.Information("Framework sync completed in {ElapsedMicroseconds} µs.", measuredTime);
 		}
 		catch (Exception ex)
 		{
 			Log.Error(ex, "Encountered error during framework sync.");
-			this.isSyncEnabled = false;
+			Interlocked.Exchange(ref this.isSyncEnabled, 0);
 		}
 
 		if (!continueProcessing)
@@ -134,11 +147,11 @@ public class FrameworkDriver : IDisposable
 			int versionAfter = Volatile.Read(ref this.requestVersion);
 			if (versionBefore == versionAfter)
 			{
-				Interlocked.Exchange(ref this.isSyncEnabled, false);
+				Interlocked.CompareExchange(ref this.isSyncEnabled, 0, 1);
 			}
 		}
 
-		return result;
+		return this.tickHook!.OriginalFunction(fPtr);
 	}
 
 	private void Dispose(bool disposing)
@@ -152,15 +165,58 @@ public class FrameworkDriver : IDisposable
 				{
 					disposable.Dispose();
 				}
+
+				while (s_workItemPool.TryTake(out var item))
+					item.Dispose();
 			}
 
 			this.disposedValue = true;
 		}
 	}
 
-	private struct WorkItem
+	/// <summary>
+	/// A wrapper for a work item to be processed on the framework thread.
+	/// </summary>
+	private sealed class WorkItem : IDisposable
 	{
-		public Action Action;
-		public ManualResetEventSlim Completion;
+		public ManualResetEventSlim Completion { get; } = new(false);
+		public Func<byte[]>? Func { get; private set; }
+		public byte[]? Result { get; private set; }
+		public Exception? CapturedException { get; private set; }
+
+		public void Setup(Func<byte[]> func)
+		{
+			this.Func = func;
+			this.Completion.Reset();
+			this.Result = null;
+			this.CapturedException = null;
+		}
+
+		public void Execute()
+		{
+			if (this.Func != null)
+			{
+				try
+				{
+					this.Result = this.Func();
+				}
+				catch (Exception ex)
+				{
+					this.CapturedException = ex;
+				}
+			}
+		}
+
+		public void Reset()
+		{
+			this.Func = null;
+			this.Result = null;
+			this.CapturedException = null;
+		}
+
+		public void Dispose()
+		{
+			this.Completion.Dispose();
+		}
 	}
 }

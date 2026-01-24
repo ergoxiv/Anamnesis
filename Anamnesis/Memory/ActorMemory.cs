@@ -255,7 +255,7 @@ public class ActorMemory : GameObjectMemory, IDisposable
 	{
 		if (this.IsRefreshing)
 		{
-			Log.Debug("Refresh requested while busy. Marking as pending.");
+			Log.Verbose("Refresh requested while busy. Marking as pending.");
 			this.needsRefresh = true;
 			return;
 		}
@@ -265,7 +265,7 @@ public class ActorMemory : GameObjectMemory, IDisposable
 
 		try
 		{
-			Log.Information($"Attempting actor refresh for actor address: {this.Address}");
+			Log.Information($"Attempting actor refresh for actor address: 0x{this.Address:X}");
 
 			this.IsRefreshing = true;
 
@@ -274,18 +274,18 @@ public class ActorMemory : GameObjectMemory, IDisposable
 				this.needsRefresh = false;
 				if (await RefreshActor(this))
 				{
-					Log.Information($"Completed actor refresh cycle for: {this.Address}");
+					Log.Information($"Completed actor refresh cycle for: 0x{this.Address:X}");
 				}
 				else
 				{
-					Log.Information($"Could not refresh actor: {this.Address}");
+					Log.Information($"Could not refresh actor: 0x{this.Address:X}");
 				}
 			}
 			while (this.needsRefresh);
 		}
 		catch (Exception ex)
 		{
-			Log.Error(ex, $"Error refreshing actor: {this.Address}");
+			Log.Error(ex, $"Error refreshing actor: 0x{this.Address:X}");
 		}
 		finally
 		{

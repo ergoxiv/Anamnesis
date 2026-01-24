@@ -1447,7 +1447,6 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 
 	private readonly WorkQueue workQueue = queue;
 	private readonly List<ConditionalTask> conditionalTasks = new();
-	private readonly Lock queueLock = new();
 	private readonly Action sendSyncRequest = sendSyncRequest;
 
 	private bool active = false;
@@ -1479,11 +1478,7 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 		}
 
 		var task = this.workQueue.Enqueue(action);
-		lock (this.queueLock)
-		{
-			this.EnsureLoopStarted();
-		}
-
+		this.SignalWorkAdded();
 		return task;
 	}
 
@@ -1529,19 +1524,14 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 			return;
 		}
 
-		lock (this.queueLock)
+		lock (this.conditionalTasks)
 		{
 			long currentTick = this.header.TickCount;
 			long targetTick = currentTick + ticks;
-			this.conditionalTasks.Add(
-				new ConditionalTask(
-					Condition: () => true, // Always true, so action runs as soon as tick is reached
-					Action: action,
-					TriggerTick: targetTick,
-					EnqueueTick: currentTick,
-					TimeoutFrames: -1));
-			this.EnsureLoopStarted();
+			this.conditionalTasks.Add(new(null, action, targetTick, currentTick, -1));
 		}
+
+		this.SignalWorkAdded();
 	}
 
 	/// <summary>
@@ -1575,13 +1565,14 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 			return;
 		}
 
-		lock (this.queueLock)
+		lock (this.conditionalTasks)
 		{
 			long currentTick = this.header.TickCount;
 			long targetTick = currentTick + deferTicks;
-			this.conditionalTasks.Add(new ConditionalTask(condition, action ?? (() => { }), targetTick, currentTick, timeoutTicks));
-			this.EnsureLoopStarted();
+			this.conditionalTasks.Add(new(condition, action ?? (() => { }), targetTick, currentTick, timeoutTicks));
 		}
+
+		this.SignalWorkAdded();
 	}
 
 	/// <summary>
@@ -1617,9 +1608,9 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 			return Task.CompletedTask;
 		}
 
-		TaskCompletionSource tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		lock (this.queueLock)
+		lock (this.conditionalTasks)
 		{
 			long currentTick = this.header.TickCount;
 			long targetTick = currentTick + deferTicks;
@@ -1644,16 +1635,7 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 					tcs));
 		}
 
-		if (Interlocked.CompareExchange(ref this.header.LoopState, 1, 0) == 0)
-		{
-			Log.Debug("Starting framework tick loop for conditional task.");
-			this.sendSyncRequest();
-		}
-		else
-		{
-			Log.Debug("Framework tick loop already active. Conditional task queued.");
-		}
-
+		this.SignalWorkAdded();
 		return tcs.Task;
 	}
 
@@ -1671,11 +1653,8 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 		this.header.TickCount++;
 		bool remainingWork = false;
 
-		lock (this.queueLock)
+		lock (this.conditionalTasks)
 		{
-			if (this.conditionalTasks.Count > 0)
-				Log.Debug($"[ProcessTick] {this.conditionalTasks.Count} tasks in queue. Tick: {this.header.TickCount}");
-
 			for (int i = this.conditionalTasks.Count - 1; i >= 0; i--)
 			{
 				var task = this.conditionalTasks[i];
@@ -1686,50 +1665,33 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 					continue;
 				}
 
-				bool isReady = false;
 				try
 				{
-					isReady = task.Condition();
+					bool isReady = task.Condition == null || task.Condition();
+
+					if (isReady)
+					{
+						this.conditionalTasks.RemoveAt(i);
+						task.Action();
+						continue;
+					}
+
+					// Check timeout
+					if (task.TimeoutFrames >= 0 && (this.header.TickCount - task.EnqueueTick) >= task.TimeoutFrames)
+					{
+						this.conditionalTasks.RemoveAt(i);
+						task.Tcs?.TrySetCanceled();
+						continue;
+					}
+
+					remainingWork = true;
 				}
 				catch (Exception ex)
 				{
-					// NOTE: All tasks and conditional should have inner error handling.
-					// This is in place just to inform of any uncaught errors.
-					Log.Error(ex, $"Error evaluating conditional task in framework service.");
+					Log.Error(ex, "Error in framework service conditional task.");
 					task.Tcs?.TrySetException(ex);
 					this.conditionalTasks.RemoveAt(i);
-					continue;
 				}
-
-				if (isReady)
-				{
-					this.conditionalTasks.RemoveAt(i);
-					try
-					{
-						Log.Information($"[ProcessTick] Condition MET for task. Executing action.");
-						task.Action();
-					}
-					catch (Exception ex)
-					{
-						Log.Error(ex, $"Error executing action task in framework service.");
-					}
-
-					continue;
-				}
-
-				if (task.TimeoutFrames >= 0 && (this.header.TickCount - task.EnqueueTick) >= task.TimeoutFrames)
-				{
-					Log.Warning($"[ProcessTick] Task TIMEOUT reached. Enqueued: {task.EnqueueTick}, Current: {this.header.TickCount}, Max: {task.TimeoutFrames}");
-
-					// Timeout reached, remove task
-					bool signaled = task.Tcs?.TrySetCanceled() ?? false;
-
-					Log.Debug($"[ProcessTick] TCS Cancellation signaled: {signaled}");
-					this.conditionalTasks.RemoveAt(i);
-					continue;
-				}
-
-				remainingWork = true;
 			}
 
 			// If we still have conditions to check, keep syncing with framework tick
@@ -1737,27 +1699,37 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 		}
 
 		remainingWork |= this.workQueue.ProcessPending(s_frameBudget);
-
 		if (remainingWork)
 			return true;
 
-		lock (this.queueLock)
-		{
-			if (this.conditionalTasks.Count == 0 && this.workQueue.IsEmpty)
-			{
-				Interlocked.Exchange(ref this.header.LoopState, 0);
-				return false;
-			}
+		// Mark as idle for now
+		Interlocked.Exchange(ref this.header.LoopState, 0);
 
+		if (this.HasWork())
+		{
+			Interlocked.Exchange(ref this.header.LoopState, 1);
 			return true;
+		}
+
+		return false;
+	}
+
+	private bool HasWork()
+	{
+		if (!this.workQueue.IsEmpty)
+			return true;
+
+		lock (this.conditionalTasks)
+		{
+			return this.conditionalTasks.Count > 0;
 		}
 	}
 
-	private void EnsureLoopStarted()
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void SignalWorkAdded()
 	{
-		if (Interlocked.CompareExchange(ref this.header.LoopState, 1, 0) == 0)
+		if (Interlocked.Exchange(ref this.header.LoopState, 1) == 0)
 		{
-			Log.Debug("Starting framework tick loop.");
 			this.sendSyncRequest();
 		}
 	}
@@ -1769,5 +1741,5 @@ public class FrameworkService(WorkQueue queue, Action sendSyncRequest)
 		[FieldOffset(64)] public int LoopState; // 0 = Idle, 1 = Active
 	}
 
-	private record struct ConditionalTask(Func<bool> Condition, Action Action, long TriggerTick, long EnqueueTick, int TimeoutFrames, TaskCompletionSource? Tcs = null);
+	private record struct ConditionalTask(Func<bool>? Condition, Action Action, long TriggerTick, long EnqueueTick, int TimeoutFrames, TaskCompletionSource? Tcs = null);
 }

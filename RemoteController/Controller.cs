@@ -14,6 +14,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 [RequiresUnreferencedCode("This class uses reflection-based hook invocation.")]
+[RequiresDynamicCode("This class uses dynamic code for hook invocation.")]
 public class Controller
 {
 	private const string BUF_SHMEM_OUTGOING = "Local\\ANAM_SHMEM_CTRL_TO_MAIN";
@@ -21,14 +22,17 @@ public class Controller
 	private const uint WATCHDOG_TIMEOUT_MS = 60000;
 	private const uint WATCHDOG_TIMER_INTERVAL_MS = 15000;
 	private const int IPC_TIMEOUT_MS = 100;
-	private const int IPC_FAST_FAIL_TIMEOUT_MS = 10;
+	private const int IPC_FAST_FAIL_TIMEOUT_MS = 16;
+	private const int BATCH_INVOKE_BUFFER_STARTSIZE = 1024;
 
+	private static readonly int s_sizeOfInt = sizeof(int);
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
 	private static readonly byte[] s_emptyPayload = [];
 	private static readonly ArrayPool<byte> s_bufferPool = ArrayPool<byte>.Shared;
 	private static readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> s_pendingHooks = new();
 	private static readonly ConcurrentDictionary<uint, byte> s_sequenceCounters = new(); // Key: Packed hook ID, Value: Sequence counter
 	private static readonly ObjectPool<PendingRequest<byte[]>> s_pendingRequestPool = new(maxSize: 128);
+	private static readonly ObjectPool<WrapperWorkItem> s_wrapperWorkItemPool = new(maxSize: 128);
 
 	private static FrameworkDriver? s_frameworkDriver = null;
 
@@ -452,40 +456,67 @@ public class Controller
 	[RequiresDynamicCode("HookRegistry requires dynamic code")]
 	private static void HandleWrapperInvoke(uint msgId, ReadOnlySpan<byte> argsPayload)
 	{
-		DispatchMode mode = (DispatchMode)argsPayload[0];
-		var actualArgs = argsPayload[1..];
-
-		int payloadLength = actualArgs.Length;
+		int payloadLength = argsPayload.Length;
 		byte[] rentedBuffer = s_bufferPool.Rent(payloadLength);
-		actualArgs.CopyTo(rentedBuffer);
+		argsPayload.CopyTo(rentedBuffer);
 
-		Func<byte[]> executionLogic = () =>
+		var workItem = s_wrapperWorkItemPool.Get();
+		workItem.Configure(msgId, rentedBuffer, payloadLength);
+		ThreadPool.UnsafeQueueUserWorkItem(workItem, false);
+	}
+
+	[RequiresDynamicCode("MarshalUtils requires dynamic code")]
+	private static byte[] ProcessInvokeBatch(ReadOnlySpan<byte> batchArgs)
+	{
+		// Payload layout:
+		// [Int32 HookCount][(Int32 HookId, Int32 PayloadLength, byte[] Payload),...]
+
+		byte[] resultBuffer = s_bufferPool.Rent(BATCH_INVOKE_BUFFER_STARTSIZE);
+		int writeOffset = 0;
+
+		try
 		{
-			return HookRegistry.Instance.InvokeOriginal(
-				HookMessageId.GetHookId(msgId),
-				rentedBuffer.AsSpan(0, payloadLength));
-		};
+			int count = MarshalUtils.Deserialize<int>(batchArgs[..s_sizeOfInt]);
+			ReadOnlySpan<byte> cursor = batchArgs[s_sizeOfInt..];
 
-		// Execute on thread pool to not block the incoming message processing loop
-		ThreadPool.UnsafeQueueUserWorkItem(state =>
+			for (int i = 0; i < count; i++)
 			{
-				try
-				{
-					byte[] result = (mode == DispatchMode.FrameworkTick) ?
-						FrameworkDriver.EnqueueAndWait(executionLogic) : executionLogic();
+				uint hId = MarshalUtils.Deserialize<uint>(cursor[..s_sizeOfInt]);
+				int argLen = MarshalUtils.Deserialize<int>(cursor.Slice(s_sizeOfInt, s_sizeOfInt));
+				ReadOnlySpan<byte> args = cursor.Slice(2 * s_sizeOfInt, argLen);
 
-					SendWrapperResult(msgId, result);
-				}
-				catch (Exception ex)
+				// Invoke
+				byte[] result = HookRegistry.Instance.InvokeOriginal(hId, args);
+
+				// Resize if needed
+				int needed = sizeof(int) + result.Length;
+				if (writeOffset + needed > resultBuffer.Length)
 				{
-					Log.Error(ex, $"Error invoking hook[ID: {HookMessageId.GetHookId(msgId)}] in mode {mode}.");
-					SendWrapperResult(msgId, []);
+					var newBuffer = s_bufferPool.Rent(Math.Max(resultBuffer.Length * 2, writeOffset + needed));
+					Buffer.BlockCopy(resultBuffer, 0, newBuffer, 0, writeOffset);
+					s_bufferPool.Return(resultBuffer);
+					resultBuffer = newBuffer;
 				}
-				finally
+
+				// Write [Len][Data]
+				MarshalUtils.Write(resultBuffer.AsSpan(writeOffset), result.Length);
+				writeOffset += sizeof(int);
+
+				if (result.Length > 0)
 				{
-					s_bufferPool.Return(rentedBuffer);
+					Buffer.BlockCopy(result, 0, resultBuffer, writeOffset, result.Length);
+					writeOffset += result.Length;
 				}
-			}, null);
+
+				cursor = cursor[((2 * s_sizeOfInt) + argLen)..];
+			}
+
+			return resultBuffer.AsSpan(0, writeOffset).ToArray();
+		}
+		finally
+		{
+			s_bufferPool.Return(resultBuffer);
+		}
 	}
 
 	private static void SendWrapperResult(uint msgId, byte[] resultPayload)
@@ -526,7 +557,6 @@ public class Controller
 		{
 			if (s_frameworkDriver != null)
 			{
-				Log.Debug("Enabling framework tick synchronization as per host request.");
 				s_frameworkDriver.IsSyncEnabled = true;
 				SendResponse(msgId, PayloadType.Ack);
 				return;
@@ -561,5 +591,86 @@ public class Controller
 		return s_sequenceCounters.AddOrUpdate(hookIndex, 1, s_incrementFunc);
 	}
 
-	private record struct HookWorkItem(uint HookIndex, byte[] Args, uint MsgId, int ArgsLength);
+	/// <summary>
+	/// A pooled work item that for wrapper hook execution in the context of a ThreadPool thread.
+	/// </summary>
+	[RequiresUnreferencedCode("This class is not trimming-safe.")]
+	[RequiresDynamicCode("HookRegistry requires dynamic code")]
+	private class WrapperWorkItem : IThreadPoolWorkItem
+	{
+		private uint msgId;
+		private byte[]? buffer;
+		private int length;
+
+		/// <summary>
+		/// Configures the work item with the necessary data for execution.
+		/// </summary>
+		/// <param name="msgId">
+		/// The message identifier for the wrapper invocation.
+		/// </param>
+		/// <param name="buffer">
+		/// The argument payload buffer.
+		/// </param>
+		/// <param name="length">
+		/// The length of valid data in the buffer.
+		/// </param>
+		public void Configure(uint msgId, byte[] buffer, int length)
+		{
+			this.msgId = msgId;
+			this.buffer = buffer;
+			this.length = length;
+		}
+
+		/// <summary>
+		/// Executes the wrapper invocation logic.
+		/// </summary>
+		public void Execute()
+		{
+			uint hookId = HookMessageId.GetHookId(this.msgId);
+
+			try
+			{
+				if (this.buffer == null)
+					return;
+
+				DispatchMode mode = (DispatchMode)this.buffer[0];
+				byte[] result;
+
+				byte[] ExecuteLogic()
+				{
+					var args = new ReadOnlySpan<byte>(this.buffer, 1, this.length - 1);
+					if (hookId != HookMessageId.BATCH_HOOK_ID)
+						return HookRegistry.Instance.InvokeOriginal(hookId, args);
+					else
+						return ProcessInvokeBatch(args);
+				}
+
+				if (mode == DispatchMode.FrameworkTick)
+				{
+					result = FrameworkDriver.EnqueueAndWait(ExecuteLogic);
+				}
+				else
+				{
+					result = ExecuteLogic();
+				}
+
+				SendWrapperResult(this.msgId, result);
+			}
+			catch (Exception ex)
+			{
+				Log.Error(ex, $"Error invoking hook[ID: {hookId}]");
+				SendWrapperResult(this.msgId, []);
+			}
+			finally
+			{
+				if (this.buffer != null)
+				{
+					s_bufferPool.Return(this.buffer);
+					this.buffer = null;
+				}
+
+				s_wrapperWorkItemPool.Return(this);
+			}
+		}
+	}
 }
