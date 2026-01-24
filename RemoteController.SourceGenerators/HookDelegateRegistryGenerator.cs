@@ -453,8 +453,9 @@ public class HookDelegateRegistryGenerator : IIncrementalGenerator
 
 	private static string GetFieldName(DelegateInfo del)
 	{
+		var classPrefix = string.IsNullOrEmpty(del.ParentClassName) ? "" : $"{char.ToLowerInvariant(del.ParentClassName[0])}{del.ParentClassName.Substring(1)}";
 		var name = del.DelegateName;
-		return $"s_{char.ToLowerInvariant(name[0])}{name.Substring(1)}";
+		return $"s_{classPrefix}{name}";
 	}
 
 	private static string GetFullDelegateTypeName(DelegateInfo del)
@@ -466,12 +467,14 @@ public class HookDelegateRegistryGenerator : IIncrementalGenerator
 
 	private static string GetSetupMethodName(DelegateInfo del)
 	{
-		return $"Setup{del.DelegateName}";
+		var classPrefix = string.IsNullOrEmpty(del.ParentClassName) ? "" : $"{del.ParentClassName}";
+		return $"Setup{classPrefix}{del.DelegateName}";
 	}
 
 	private static string GetInvokeMethodName(DelegateInfo del)
 	{
-		return $"Invoke{del.DelegateName}Typed";
+		var classPrefix = string.IsNullOrEmpty(del.ParentClassName) ? "" : $"{del.ParentClassName}";
+		return $"Invoke{classPrefix}{del.DelegateName}Typed";
 	}
 
 	private sealed class DelegateInfo(
