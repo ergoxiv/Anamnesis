@@ -332,8 +332,11 @@ public class ControllerService : ServiceBase<ControllerService>
 	private readonly ConcurrentDictionary<uint, Func<ReadOnlySpan<byte>, byte[]>> handlers = new();
 	private readonly ConcurrentDictionary<uint, byte> sequenceCounters = new();
 	private readonly ConcurrentDictionary<string, uint> delegateKeyToHookId = new();
-	private readonly ObjectPool<PendingRequest<byte[]>> wrapperRequestPool = new(maxSize: 64);
+	private readonly ObjectPool<PendingRequest<byte[]>> wrapperRequestPool = new(maxSize: 128);
 	private readonly PendingRequest<bool> pendingByeMessage = new();
+
+	private readonly WorkPipeline workPipeline = new(Math.Max(Environment.ProcessorCount / 2, 1));
+	private readonly ObjectPool<WorkItem<(ControllerService, uint, byte[], int)>> workItemPool = new(maxSize: 128);
 
 	private readonly WorkQueue frameworkQueue = new();
 	private FrameworkService? framework;
@@ -741,6 +744,18 @@ public class ControllerService : ServiceBase<ControllerService>
 		await base.OnStart();
 	}
 
+	private static void ProcessHookRequestInternal((ControllerService Ctrl, uint MsgId, byte[] Data, int Length) state)
+	{
+		try
+		{
+			state.Ctrl.HandleHookRequest(state.MsgId, state.Data.AsSpan(0, state.Length));
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(state.Data);
+		}
+	}
+
 	/// <summary>
 	/// An encapsulation of the IPC request registration logic.
 	/// </summary>
@@ -1067,7 +1082,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 	}
 
-	private async Task ProcessIncomingMessages(CancellationToken cancellationToken)
+	private void ProcessIncomingMessages(CancellationToken cancellationToken)
 	{
 		while (this.IsInitialized && !cancellationToken.IsCancellationRequested)
 		{
@@ -1089,22 +1104,7 @@ public class ControllerService : ServiceBase<ControllerService>
 							break;
 
 						case PayloadType.Request when payload.Length > 0:
-							byte[] payloadCopy = ArrayPool<byte>.Shared.Rent(payload.Length);
-							int length = payload.Length;
-							payload.CopyTo(payloadCopy);
-							ThreadPool.UnsafeQueueUserWorkItem(
-								_ =>
-								{
-									try
-									{
-										this.HandleHookRequest(header.Id, payloadCopy.AsSpan(0, length));
-									}
-									finally
-									{
-										ArrayPool<byte>.Shared.Return(payloadCopy);
-									}
-								},
-								true);
+							this.EnqueueHookRequest(header.Id, payload);
 							break;
 
 						case PayloadType.Blob:
@@ -1213,6 +1213,21 @@ public class ControllerService : ServiceBase<ControllerService>
 		{
 			Log.Warning($"Received hook result for unknown request: {msgId}");
 		}
+	}
+
+	private void EnqueueHookRequest(uint msgId, ReadOnlySpan<byte> payload)
+	{
+		byte[] payloadCopy = ArrayPool<byte>.Shared.Rent(payload.Length);
+		int length = payload.Length;
+		payload.CopyTo(payloadCopy);
+
+		var workItem = this.workItemPool.Get();
+		unsafe
+		{
+			workItem.Initialize(this.workItemPool, &ProcessHookRequestInternal, (this, msgId, payloadCopy, length));
+		}
+
+		this.workPipeline.Enqueue(workItem);
 	}
 
 	private void HandleHookRequest(uint msgId, ReadOnlySpan<byte> payload)

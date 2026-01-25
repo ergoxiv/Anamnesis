@@ -32,7 +32,9 @@ public class Controller
 	private static readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> s_pendingHooks = new();
 	private static readonly ConcurrentDictionary<uint, byte> s_sequenceCounters = new(); // Key: Packed hook ID, Value: Sequence counter
 	private static readonly ObjectPool<PendingRequest<byte[]>> s_pendingRequestPool = new(maxSize: 128);
-	private static readonly ObjectPool<WrapperWorkItem> s_wrapperWorkItemPool = new(maxSize: 128);
+
+	private static readonly WorkPipeline s_workPipeline = new(Math.Max(Environment.ProcessorCount / 2, 1));
+	private static readonly ObjectPool<WorkItem<(uint, byte[], int)>> s_workItemPool = new(maxSize: 128);
 
 	private static FrameworkDriver? s_frameworkDriver = null;
 
@@ -91,7 +93,7 @@ public class Controller
 			// Wait for response
 			if (!pending.Wait(IPC_TIMEOUT_MS))
 			{
-				Log.Warning($"Timeout waiting for intercept response for hook {hookIndex}");
+				Log.Warning($"Timeout waiting for intercept response for hook {hookIndex} (MsgId: {msgId}).");
 				return s_emptyPayload;
 			}
 
@@ -453,6 +455,47 @@ public class Controller
 		s_outgoingEndpoint.Write(header, IPC_TIMEOUT_MS);
 	}
 
+	private static void ProcessInvokeInternal((uint MsgId, byte[] Data, int Length) state)
+	{
+		uint hookId = HookMessageId.GetHookId(state.MsgId);
+
+		try
+		{
+			DispatchMode mode = (DispatchMode)state.Data[0];
+			byte[] result;
+
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			byte[] ExecuteLogic()
+			{
+				var args = new ReadOnlySpan<byte>(state.Data, 1, state.Length - 1);
+				if (hookId != HookMessageId.BATCH_HOOK_ID)
+					return HookRegistry.Instance.InvokeOriginal(hookId, args);
+				else
+					return ProcessInvokeBatch(args);
+			}
+
+			if (mode == DispatchMode.FrameworkTick)
+			{
+				result = FrameworkDriver.EnqueueAndWait(ExecuteLogic);
+			}
+			else
+			{
+				result = ExecuteLogic();
+			}
+
+			SendWrapperResult(state.MsgId, result);
+		}
+		catch (Exception ex)
+		{
+			Log.Error(ex, $"Error invoking hook[ID: {hookId}]");
+			SendWrapperResult(state.MsgId, []);
+		}
+		finally
+		{
+			s_bufferPool.Return(state.Data);
+		}
+	}
+
 	[RequiresDynamicCode("HookRegistry requires dynamic code")]
 	private static void HandleWrapperInvoke(uint msgId, ReadOnlySpan<byte> argsPayload)
 	{
@@ -460,9 +503,13 @@ public class Controller
 		byte[] rentedBuffer = s_bufferPool.Rent(payloadLength);
 		argsPayload.CopyTo(rentedBuffer);
 
-		var workItem = s_wrapperWorkItemPool.Get();
-		workItem.Configure(msgId, rentedBuffer, payloadLength);
-		ThreadPool.UnsafeQueueUserWorkItem(workItem, false);
+		var workItem = s_workItemPool.Get();
+		unsafe
+		{
+			workItem.Initialize(s_workItemPool, &ProcessInvokeInternal, (msgId, rentedBuffer, payloadLength));
+		}
+
+		s_workPipeline.Enqueue(workItem);
 	}
 
 	[RequiresDynamicCode("MarshalUtils requires dynamic code")]
@@ -539,7 +586,7 @@ public class Controller
 		}
 		else
 		{
-			Log.Warning($"Received response for unknown request: 0x{msgId:X8}");
+			Log.Warning($"Received response for unknown request with message ID: {msgId}.");
 		}
 	}
 
@@ -572,16 +619,22 @@ public class Controller
 
 	private static void HandleGoodbyeMessage(uint msgId)
 	{
-		Log.Information("Received goodbye message from host. Shutting down controller...");
-		s_running = false;
-
-		if (s_outgoingEndpoint == null)
-			return;
-
-		var header = new MessageHeader(msgId, PayloadType.Ack, 0);
-		if (!s_outgoingEndpoint.Write(header, s_emptyPayload, IPC_TIMEOUT_MS))
+		try
 		{
-			Log.Error($"Failed to acknowledge goodbye message from host application.");
+			if (s_outgoingEndpoint == null)
+				return;
+
+			Log.Information("Received goodbye message from host. Shutting down controller...");
+
+			var header = new MessageHeader(msgId, PayloadType.Ack, 0);
+			if (!s_outgoingEndpoint.Write(header, s_emptyPayload, IPC_TIMEOUT_MS))
+			{
+				Log.Error($"Failed to acknowledge goodbye message from host application.");
+			}
+		}
+		finally
+		{
+			s_running = false;
 		}
 	}
 
@@ -589,88 +642,5 @@ public class Controller
 	private static byte GetNextSequence(uint hookIndex)
 	{
 		return s_sequenceCounters.AddOrUpdate(hookIndex, 1, s_incrementFunc);
-	}
-
-	/// <summary>
-	/// A pooled work item that for wrapper hook execution in the context of a ThreadPool thread.
-	/// </summary>
-	[RequiresUnreferencedCode("This class is not trimming-safe.")]
-	[RequiresDynamicCode("HookRegistry requires dynamic code")]
-	private class WrapperWorkItem : IThreadPoolWorkItem
-	{
-		private uint msgId;
-		private byte[]? buffer;
-		private int length;
-
-		/// <summary>
-		/// Configures the work item with the necessary data for execution.
-		/// </summary>
-		/// <param name="msgId">
-		/// The message identifier for the wrapper invocation.
-		/// </param>
-		/// <param name="buffer">
-		/// The argument payload buffer.
-		/// </param>
-		/// <param name="length">
-		/// The length of valid data in the buffer.
-		/// </param>
-		public void Configure(uint msgId, byte[] buffer, int length)
-		{
-			this.msgId = msgId;
-			this.buffer = buffer;
-			this.length = length;
-		}
-
-		/// <summary>
-		/// Executes the wrapper invocation logic.
-		/// </summary>
-		public void Execute()
-		{
-			uint hookId = HookMessageId.GetHookId(this.msgId);
-
-			try
-			{
-				if (this.buffer == null)
-					return;
-
-				DispatchMode mode = (DispatchMode)this.buffer[0];
-				byte[] result;
-
-				byte[] ExecuteLogic()
-				{
-					var args = new ReadOnlySpan<byte>(this.buffer, 1, this.length - 1);
-					if (hookId != HookMessageId.BATCH_HOOK_ID)
-						return HookRegistry.Instance.InvokeOriginal(hookId, args);
-					else
-						return ProcessInvokeBatch(args);
-				}
-
-				if (mode == DispatchMode.FrameworkTick)
-				{
-					result = FrameworkDriver.EnqueueAndWait(ExecuteLogic);
-				}
-				else
-				{
-					result = ExecuteLogic();
-				}
-
-				SendWrapperResult(this.msgId, result);
-			}
-			catch (Exception ex)
-			{
-				Log.Error(ex, $"Error invoking hook[ID: {hookId}]");
-				SendWrapperResult(this.msgId, []);
-			}
-			finally
-			{
-				if (this.buffer != null)
-				{
-					s_bufferPool.Return(this.buffer);
-					this.buffer = null;
-				}
-
-				s_wrapperWorkItemPool.Return(this);
-			}
-		}
 	}
 }
