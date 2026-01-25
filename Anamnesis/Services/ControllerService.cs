@@ -1175,7 +1175,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			return;
 		}
 
-		if (this.pendingByeMessage.TryGetResult(out _))
+		if (msgId == HookMessageId.GOODBYE_MESSAGE_ID)
 		{
 			this.pendingByeMessage.SetResult(true);
 			return;
@@ -1196,7 +1196,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			return;
 		}
 
-		if (this.pendingByeMessage.TryGetResult(out _))
+		if (msgId == HookMessageId.GOODBYE_MESSAGE_ID)
 		{
 			this.pendingByeMessage.SetResult(false);
 			return;
@@ -1415,7 +1415,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			return;
 
 		this.pendingByeMessage.Reset();
-		var header = new MessageHeader(type: PayloadType.Bye);
+		var header = new MessageHeader(HookMessageId.GOODBYE_MESSAGE_ID, type: PayloadType.Bye);
 		this.outgoingEndpoint.Write(header, IPC_TIMEOUT_MS);
 
 		if (this.pendingByeMessage.Wait(IPC_TIMEOUT_MS))

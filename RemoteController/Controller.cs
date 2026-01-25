@@ -621,16 +621,8 @@ public class Controller
 	{
 		try
 		{
-			if (s_outgoingEndpoint == null)
-				return;
-
 			Log.Information("Received goodbye message from host. Shutting down controller...");
-
-			var header = new MessageHeader(msgId, PayloadType.Ack, 0);
-			if (!s_outgoingEndpoint.Write(header, s_emptyPayload, IPC_TIMEOUT_MS))
-			{
-				Log.Error($"Failed to acknowledge goodbye message from host application.");
-			}
+			SendResponse(msgId, PayloadType.Ack);
 		}
 		finally
 		{
