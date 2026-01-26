@@ -24,6 +24,7 @@ public class Controller
 	private const int IPC_TIMEOUT_MS = 100;
 	private const int IPC_FAST_FAIL_TIMEOUT_MS = 16;
 	private const int BATCH_INVOKE_BUFFER_STARTSIZE = 1024;
+	private const int STACKALLOC_THRESHOLD = 256;
 
 	private static readonly int s_sizeOfInt = sizeof(int);
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
@@ -129,13 +130,29 @@ public class Controller
 			return false;
 		}
 
+		byte[]? rented = null;
+		int payloadSize = Unsafe.SizeOf<FrameworkMessageData>();
+		var data = new FrameworkMessageData { Type = FrameworkMessageType.TickSyncRequest };
+		var header = new MessageHeader(msgId, PayloadType.Request, (ulong)payloadSize);
+		bool sent;
+
 		try
 		{
-			var data = new FrameworkMessageData { Type = FrameworkMessageType.TickSyncRequest };
-			byte[] payload = MarshalUtils.Serialize(data);
-			var header = new MessageHeader(msgId, PayloadType.Request, (ulong)payload.Length);
+			if (payloadSize <= STACKALLOC_THRESHOLD)
+			{
+				Span<byte> payload = stackalloc byte[payloadSize];
+				MarshalUtils.Write(payload, in data);
+				sent = s_outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS);
+			}
+			else
+			{
+				rented = ArrayPool<byte>.Shared.Rent(payloadSize);
+				Span<byte> rentedSpan = rented.AsSpan(0, payloadSize);
+				MarshalUtils.Write(rentedSpan, in data);
+				sent = s_outgoingEndpoint.Write(header, rentedSpan, IPC_TIMEOUT_MS);
+			}
 
-			if (!s_outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS))
+			if (!sent)
 			{
 				Log.Warning("Failed to send framework tick sync request.");
 				return false;
@@ -151,6 +168,9 @@ public class Controller
 		}
 		finally
 		{
+			if (rented != null)
+				ArrayPool<byte>.Shared.Return(rented);
+
 			s_pendingHooks.TryRemove(msgId, out _);
 			pending.Reset();
 			s_pendingRequestPool.Return(pending);

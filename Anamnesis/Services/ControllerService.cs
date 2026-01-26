@@ -316,7 +316,7 @@ public class ControllerService : ServiceBase<ControllerService>
 
 	private const int IPC_REGISTER_TIMEOUT_MS = 1000;
 	private const int HEARTBEAT_INTERVAL_MS = 15_000;
-	private const int STACKALLOC_THRESHOLD = 255;
+	private const int STACKALLOC_THRESHOLD = 256;
 	private const int CONN_CHECK_DELAY_MS = 1000;
 
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
@@ -1383,18 +1383,45 @@ public class ControllerService : ServiceBase<ControllerService>
 			return;
 
 		var data = new FrameworkMessageData { Type = FrameworkMessageType.EnableTickSync };
-		byte[] payload = MarshalUtils.Serialize(data);
-		var header = new MessageHeader(HookMessageId.FRAMEWORK_SYSTEM_ID, PayloadType.Request, (ulong)payload.Length);
+		int payloadSize = Unsafe.SizeOf<FrameworkMessageData>();
+		var header = new MessageHeader(HookMessageId.FRAMEWORK_SYSTEM_ID, PayloadType.Request, (ulong)payloadSize);
 
 		byte seq = this.GetNextSequence(HookMessageId.FRAMEWORK_SYSTEM_ID);
 		uint msgId = HookMessageId.Pack(HookMessageId.FRAMEWORK_SYSTEM_ID, seq);
 		var pending = new PendingRequest<byte[]>();
 		this.pendingHookRequests[msgId] = pending;
 
-		if (!this.outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS))
+		byte[]? rented = null;
+		bool sent;
+
+		try
 		{
-			Log.Warning("Failed to send framework sync request");
-			this.pendingHookRequests.TryRemove(msgId, out _);
+			if (payloadSize <= STACKALLOC_THRESHOLD)
+			{
+				Span<byte> payload = stackalloc byte[payloadSize];
+				MarshalUtils.Write(payload, in data);
+				sent = this.outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS);
+			}
+			else
+			{
+				rented = ArrayPool<byte>.Shared.Rent(payloadSize);
+				Span<byte> rentedSpan = rented.AsSpan(0, payloadSize);
+				MarshalUtils.Write(rentedSpan, in data);
+				sent = this.outgoingEndpoint.Write(header, rentedSpan, IPC_TIMEOUT_MS);
+			}
+
+			if (!sent)
+			{
+				Log.Warning("Failed to send framework sync request");
+				this.pendingHookRequests.TryRemove(msgId, out _);
+			}
+		}
+		finally
+		{
+			if (rented != null)
+			{
+				ArrayPool<byte>.Shared.Return(rented);
+			}
 		}
 	}
 
