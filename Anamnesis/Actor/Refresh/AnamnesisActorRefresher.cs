@@ -39,7 +39,7 @@ public class AnamnesisActorRefresher : IActorRefresher
 			return;
 
 		var isInGpose = GposeService.IsInGpose() ?? GposeService.Instance.IsGpose;
-		if (SettingsService.Current.EnableNpcHack && isInGpose && actor.ObjectKind == ActorTypes.Player)
+		if (SettingsService.Current.EnableNpcHack && !isInGpose && actor.ObjectKind == ActorTypes.Player)
 		{
 			// NOTE: This workaround is necessary only when we're in the overworld
 			actor.ObjectKind = ActorTypes.EventNpc;
