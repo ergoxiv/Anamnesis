@@ -872,7 +872,7 @@ public class ControllerService : ServiceBase<ControllerService>
 				targetAddress = MemoryService.Scanner.ScanText(attr.Signature);
 			}
 		}
-		catch (KeyNotFoundException ex)
+		catch (Exception ex)
 		{
 			Log.Error(ex, $"Failed to resolve signature for: {delegateKey}");
 			return null;
@@ -1301,7 +1301,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			// Resolve function address at vtable location
 			targetAddress = MemoryService.ReadPtr(targetAddress);
 		}
-		catch (KeyNotFoundException ex)
+		catch (Exception ex)
 		{
 			Log.Error(ex, $"Failed to resolve signature for: {delegateKey}");
 			return;
