@@ -26,6 +26,10 @@ public class Controller
 	private const int BATCH_INVOKE_BUFFER_STARTSIZE = 1024;
 	private const int STACKALLOC_THRESHOLD = 256;
 
+	private const string FASM_RESOURCE_NAME = "FASMX64";
+	private const string FASM_RESOURCE_FILENAME = $"{FASM_RESOURCE_NAME}.dll";
+	private const string FASM_RESOURCE_SEARCH_PATTERN = $"{FASM_RESOURCE_NAME}.*dll";
+
 	private static readonly int s_sizeOfInt = sizeof(int);
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
 	private static readonly byte[] s_emptyPayload = [];
@@ -213,6 +217,19 @@ public class Controller
 				return;
 			}
 
+			// Locate the last copied library to avoid linking Reloaded.Hooks to a mismatched resource
+			string? fasmPath = FindFasmDll(Directory.GetCurrentDirectory());
+			if (fasmPath == null)
+				return;
+
+			NativeLibrary.SetDllImportResolver(typeof(Reloaded.Hooks.ReloadedHooks).Assembly, (libName, asm, searchPath) =>
+			{
+				if (libName.Equals(FASM_RESOURCE_FILENAME, StringComparison.OrdinalIgnoreCase) || libName.Equals(FASM_RESOURCE_NAME, StringComparison.OrdinalIgnoreCase))
+					return NativeLibrary.Load(fasmPath);
+
+				return IntPtr.Zero;
+			});
+
 			Log.Debug("Creating IPC endpoints...");
 			try
 			{
@@ -307,6 +324,23 @@ public class Controller
 			uint length = NativeFunctions.GetModuleFileName(hModule, pBuffer, (uint)buffer.Length);
 			return length > 0 ? new string(buffer[..(int)length]) : null;
 		}
+	}
+
+	private static string? FindFasmDll(string directory)
+	{
+		var dirInfo = new DirectoryInfo(directory);
+		var latestFasmDll = dirInfo.GetFiles(FASM_RESOURCE_SEARCH_PATTERN, SearchOption.TopDirectoryOnly)
+			.OrderByDescending(f => f.LastWriteTimeUtc)
+			.FirstOrDefault();
+
+		if (latestFasmDll == null)
+		{
+			Log.Error($"Failed to locate FASMX64 library in {directory}");
+			return null;
+		}
+
+		Log.Debug($"Discovered FASM DLL: {latestFasmDll.FullName}");
+		return latestFasmDll.FullName;
 	}
 
 	[RequiresDynamicCode("HookRegistry requires dynamic code")]
