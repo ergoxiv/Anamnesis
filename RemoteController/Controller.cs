@@ -49,6 +49,7 @@ public class Controller
 	private static long s_heartbeatTimestamp = 0;
 	private static Timer? s_watchdogTimer;
 	private static volatile bool s_running = true;
+	private static bool s_dllImportResolverSet = false;
 
 	[RequiresDynamicCode("Requires dynamic code")]
 	private static unsafe void* NativePtr() => (delegate* unmanaged<void>)&RemoteControllerEntry;
@@ -222,13 +223,17 @@ public class Controller
 			if (fasmPath == null)
 				return;
 
-			NativeLibrary.SetDllImportResolver(typeof(Reloaded.Hooks.ReloadedHooks).Assembly, (libName, asm, searchPath) =>
+			if (!s_dllImportResolverSet)
 			{
-				if (libName.Equals(FASM_RESOURCE_FILENAME, StringComparison.OrdinalIgnoreCase) || libName.Equals(FASM_RESOURCE_NAME, StringComparison.OrdinalIgnoreCase))
-					return NativeLibrary.Load(fasmPath);
+				NativeLibrary.SetDllImportResolver(typeof(Reloaded.Hooks.ReloadedHooks).Assembly, (libName, asm, searchPath) =>
+				{
+					if (libName.Equals(FASM_RESOURCE_FILENAME, StringComparison.OrdinalIgnoreCase) || libName.Equals(FASM_RESOURCE_NAME, StringComparison.OrdinalIgnoreCase))
+						return NativeLibrary.Load(fasmPath);
 
-				return IntPtr.Zero;
-			});
+					return IntPtr.Zero;
+				});
+				s_dllImportResolverSet = true;
+			}
 
 			Log.Debug("Creating IPC endpoints...");
 			try
