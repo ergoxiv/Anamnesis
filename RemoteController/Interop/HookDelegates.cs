@@ -30,28 +30,13 @@ public static class Character
 
 public static class Framework
 {
-	[FunctionBind("48 8D 05 ?? ?? ?? ?? 66 C7 41 ?? ?? ?? 48 89 01 48 8B F1", offset: 0x20)]
+	[FunctionBind("48 8D 05 ?? ?? ?? ?? 66 C7 41 ?? ?? ?? 48 89 01 48 8B F1", 0x20, SigResolveStrategy.VTableLookup)]
 	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
 	public delegate byte Tick(nint fPtr);
 
 	[FunctionBind("40 53 55 57 41 55 48 83 EC ?? ?? 48 ?? ?? ?? ?? ?? ?? ?? 48")]
 	[UnmanagedFunctionPointer(CallingConvention.StdCall)]
 	public delegate void RenderGraphics(long a1);
-}
-
-public static class GameObject
-{
-	[FunctionBind("0F B6 81 ?? ?? ?? ?? 84 C0 78 2F")]
-	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-	public delegate byte EnableDraw(nint objPtr);
-
-	[FunctionBind("40 53 48 83 EC 20 80 B9 ?? ?? ?? ?? ?? 48 8B D9 7D 1F")]
-	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-	public delegate long DisableDraw(nint objPtr);
-
-	[FunctionBind("E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 17 45 33 C9")]
-	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-	public delegate byte IsReadyToDraw(nint objPtr);
 }
 
 public static class GameMain

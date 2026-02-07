@@ -4,11 +4,11 @@
 namespace Anamnesis;
 
 using Anamnesis.Core;
-using Anamnesis.Memory;
 using Anamnesis.Services;
 using RemoteController;
 using RemoteController.Interop;
 using RemoteController.IPC;
+using RemoteController.Memory;
 using Serilog;
 using SharedMemoryIPC;
 using System;
@@ -850,45 +850,8 @@ public class ControllerService : ServiceBase<ControllerService>
 			return null;
 		}
 
-		if (typeof(TDelegate).GetCustomAttributes(typeof(FunctionBindAttribute), false)
-			.FirstOrDefault() is not FunctionBindAttribute attr)
-		{
-			Log.Error($"Delegate {delegateKey} is not decorated with FunctionBindAttribute");
-			return null;
-		}
-
-		if (MemoryService.Scanner == null)
-			throw new Exception("No memory scanner");
-
-		nint targetAddress = 0;
-		try
-		{
-			if (attr.Offset != 0)
-			{
-				targetAddress = MemoryService.Scanner.GetStaticAddressFromSig(attr.Signature, attr.Offset);
-			}
-			else
-			{
-				targetAddress = MemoryService.Scanner.ScanText(attr.Signature);
-			}
-		}
-		catch (Exception ex)
-		{
-			Log.Error(ex, $"Failed to resolve signature for: {delegateKey}");
-			return null;
-		}
-
-		Log.Verbose($"Resolved signature for {delegateKey} to address 0x{targetAddress:X}");
-
-		if (targetAddress == 0)
-		{
-			Log.Error($"Failed to resolve signature for: {delegateKey}");
-			return null;
-		}
-
 		var registerPayload = new HookRegistrationData
 		{
-			Address = targetAddress,
 			HookType = hookType,
 			HookBehavior = behavior,
 			DelegateKeyLength = delegateKey.Length,
@@ -1279,45 +1242,8 @@ public class ControllerService : ServiceBase<ControllerService>
 			return;
 		}
 
-		if (delType.GetCustomAttributes(typeof(FunctionBindAttribute), false)
-			.FirstOrDefault() is not FunctionBindAttribute attr)
-		{
-			Log.Error($"Delegate {delegateKey} is not decorated with FunctionBindAttribute");
-			return;
-		}
-
-		if (MemoryService.Scanner == null)
-			throw new Exception("No memory scanner");
-
-		nint targetAddress = 0;
-		try
-		{
-			// Get base vtable address
-			targetAddress = MemoryService.Scanner.GetStaticAddressFromSig(attr.Signature);
-
-			// Offset to function in vtable
-			targetAddress += attr.Offset;
-
-			// Resolve function address at vtable location
-			targetAddress = MemoryService.ReadPtr(targetAddress);
-		}
-		catch (Exception ex)
-		{
-			Log.Error(ex, $"Failed to resolve signature for: {delegateKey}");
-			return;
-		}
-
-		Log.Verbose($"Resolved signature for {delegateKey} to address 0x{targetAddress:X}");
-
-		if (targetAddress == 0)
-		{
-			Log.Error($"Failed to resolve signature for: {delegateKey}");
-			return;
-		}
-
 		var registerPayload = new HookRegistrationData
 		{
-			Address = targetAddress,
 			HookType = HookType.System,
 			HookBehavior = HookBehavior.After, // Ignored
 			DelegateKeyLength = delegateKey.Length,

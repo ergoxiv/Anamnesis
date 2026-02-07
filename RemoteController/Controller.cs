@@ -5,10 +5,12 @@ namespace RemoteController;
 
 using RemoteController.Interop;
 using RemoteController.IPC;
+using RemoteController.Memory;
 using Serilog;
 using SharedMemoryIPC;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -30,6 +32,7 @@ public class Controller
 	private const string FASM_RESOURCE_FILENAME = $"{FASM_RESOURCE_NAME}.dll";
 	private const string FASM_RESOURCE_SEARCH_PATTERN = $"{FASM_RESOURCE_NAME}.*dll";
 
+	private static readonly InProcessMemoryReader s_memoryReader = new();
 	private static readonly int s_sizeOfInt = sizeof(int);
 	private static readonly Func<uint, byte, byte> s_incrementFunc = static (_, v) => (byte)((v + 1) & 0xFF);
 	private static readonly byte[] s_emptyPayload = [];
@@ -41,6 +44,8 @@ public class Controller
 	private static readonly WorkPipeline s_workPipeline = new(Math.Max(Environment.ProcessorCount / 2, 1));
 	private static readonly ObjectPool<WorkItem<(uint, byte[], int)>> s_workItemPool = new(maxSize: 128);
 
+	public static SignatureScanner? Scanner = null;
+	public static SignatureResolver? SigResolver = null;
 	private static FrameworkDriver? s_frameworkDriver = null;
 
 	private static Endpoint? s_outgoingEndpoint = null;
@@ -234,6 +239,15 @@ public class Controller
 				});
 				s_dllImportResolverSet = true;
 			}
+
+			Process currentProcess = Process.GetCurrentProcess();
+			if (currentProcess.MainModule == null)
+			{
+				Log.Error("Failed to get main module of the current process.");
+				return;
+			}
+			Scanner = new SignatureScanner(currentProcess.MainModule, s_memoryReader);
+			SigResolver = new SignatureResolver(Scanner, s_memoryReader);
 
 			Log.Debug("Creating IPC endpoints...");
 			try
@@ -452,17 +466,22 @@ public class Controller
 		}
 
 		var regPayload = MemoryMarshal.Read<HookRegistrationData>(data);
+		string delegateKey = regPayload.GetKey();
 
 		if (regPayload.HookType == HookType.System)
 		{
 			// Handle system hook registration
+			nint address = SigResolver?.Resolve(delegateKey) ?? 0;
 			try
 			{
+				if (address == 0)
+					throw new Exception($"Failed to resolve address for delegate key: {delegateKey}.");
+
 				if (regPayload.HookId == HookMessageId.FRAMEWORK_SYSTEM_ID)
 				{
 					s_frameworkDriver?.Dispose();
-					s_frameworkDriver = new FrameworkDriver(regPayload.Address);
-					Log.Information($"Framework driver registered at 0x{regPayload.Address:X}");
+					s_frameworkDriver = new FrameworkDriver(address);
+					Log.Information($"Framework driver registered at 0x{address:X}.");
 					byte[] payload = BitConverter.GetBytes(HookMessageId.FRAMEWORK_SYSTEM_ID);
 					var header = new MessageHeader(requestId, PayloadType.Ack, (ulong)payload.Length);
 					s_outgoingEndpoint?.Write(header, payload, IPC_TIMEOUT_MS);
@@ -482,7 +501,6 @@ public class Controller
 		else
 		{
 			// Handle standard hook registration
-			string delegateKey = regPayload.GetKey();
 			uint hookId = HookRegistry.Instance.RegisterHook(regPayload);
 
 			if (hookId != 0)

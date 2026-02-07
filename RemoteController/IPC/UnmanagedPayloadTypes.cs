@@ -17,7 +17,6 @@ public unsafe struct HookRegistrationData
 
 	public int DelegateKeyLength;
 	public fixed byte DelegateKey[MAX_KEY_LENGTH];
-	public nint Address;
 	public HookType HookType;
 	public HookBehavior HookBehavior;
 

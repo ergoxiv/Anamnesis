@@ -42,6 +42,9 @@ public enum HookBehavior
 	Replace,
 }
 
+/// <summary>
+/// An enum that specifies the type of function hook to create.
+/// </summary>
 public enum HookType
 {
 	/// <summary>
@@ -65,13 +68,37 @@ public enum HookType
 }
 
 /// <summary>
+/// An enum that specifies the strategy for resolving memory signatures.
+/// </summary>
+public enum SigResolveStrategy
+{
+	/// <summary>
+	/// Resolves the signature by scanning the module's .text section for a matching byte pattern.
+	/// </summary>
+	TextScan,
+
+	/// <summary>
+	/// Resolves the signature as a static address, with an optional offset.
+	/// </summary>
+	StaticAddress,
+
+	/// <summary>
+	/// Resolves the signature as a vtable entry, with an optional offset.
+	/// </summary>
+	VTableLookup,
+}
+
+/// <summary>
 /// Initializes a new instance of the <see cref="FunctionBindAttribute"/> class.
 /// </summary>
 /// <param name="hookType">The type of hook to create.</param>
 /// <param name="signature">The memory signature of the function to hook.</param>
 /// <param name="offset">An optional offset to apply after signature resolution.</param>
 [AttributeUsage(AttributeTargets.Delegate, AllowMultiple = false)]
-public sealed class FunctionBindAttribute(string signature, int offset = 0) : Attribute
+public sealed class FunctionBindAttribute(
+	string signature,
+	int offset = 0,
+	SigResolveStrategy strategy = SigResolveStrategy.TextScan) : Attribute
 {
 	/// <summary>
 	/// Gets the memory signature of the function to hook.
@@ -82,4 +109,10 @@ public sealed class FunctionBindAttribute(string signature, int offset = 0) : At
 	/// Gets the offset to apply after signature resolution.
 	/// </summary>
 	public int Offset { get; } = offset;
+
+	/// <summary>
+	/// Gets the resolution strategy for the specified signature.
+	/// The default is <see cref="SigResolveStrategy.TextScan"/>.
+	/// </summary>
+	public SigResolveStrategy Strategy { get; } = strategy;
 }
