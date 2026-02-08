@@ -19,7 +19,7 @@ public class PenumbraActorRefresher : IActorRefresher
 			return false;
 
 		// Penumbra can't refresh world frozen actors
-		if (PoseService.Instance.FreezeWorldPosition)
+		if (PoseService.Instance.FreezeWorldState)
 			return false;
 
 		// Penumbra can't refresh overworld actors in gpose

@@ -284,8 +284,6 @@
   "Character_Action_AnimationOverrideSpeedBlocked": "단체 자세 내에서만 이용할 수 있습니다.",
   "Character_Action_AnimationOverrideSpeedControlDisable": "속도 제어가 켜졌을 때만 이용할 수 있습니다.",
   "Character_Action_AnimationOverrideGposeFrozen": "액터 동작이 단체 자세를 통해 얼려져 있습니다.",
-  "Character_Action_GlobalFreezeWorldPositions": "위치 얼리기",
-  "Character_Action_GlobalFreezeWorldPositionsTooltip": "액터/카메라 월드 위치를 얼립니다.",
   "Character_Action_GlobalSpeedControl": "속도 제어",
   "Character_Action_GlobalAllActorSpeedControl": "모든 액터 제어",
   "Character_Action_LinkSpeed": "모든 애니메이션 슬롯의 속도 제어를 연결합니다.",

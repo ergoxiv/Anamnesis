@@ -281,7 +281,7 @@
 			<XivToolsWpf:InfoControl.Visibility>
 				<MultiBinding Converter="{StaticResource MultiBoolAndToVisibility}">
 					<Binding Path="Actor.Unsafe.CanRefresh" Converter="{StaticResource !B}"/>
-					<Binding Path="PoseService.FreezeWorldPosition"/>
+					<Binding Path="PoseService.FreezeWorldState"/>
 				</MultiBinding>
 			</XivToolsWpf:InfoControl.Visibility>
 		</XivToolsWpf:InfoControl>
@@ -290,7 +290,7 @@
 			<XivToolsWpf:InfoControl.Visibility>
 				<MultiBinding Converter="{StaticResource MultiBoolAndToVisibility}">
 					<Binding Path="Actor.Unsafe.CanRefresh" Converter="{StaticResource !B}"/>
-					<Binding Path="PoseService.WorldPositionNotFrozen"/>
+					<Binding Path="PoseService.WorldStateNotFrozen"/>
 				</MultiBinding>
 			</XivToolsWpf:InfoControl.Visibility>
 		</XivToolsWpf:InfoControl>

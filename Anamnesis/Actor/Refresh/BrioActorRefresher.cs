@@ -25,7 +25,7 @@ public class BrioActorRefresher : IActorRefresher
 		// Brio doesn't support refresh on world-frozen actors.
 		// Trying to refresh a world-frozen actor will cause the actor to be
 		// sent to world origin (0, 0, 0).
-		if (PoseService.Instance.FreezeWorldPosition)
+		if (PoseService.Instance.FreezeWorldState)
 			return false;
 
 		return true;

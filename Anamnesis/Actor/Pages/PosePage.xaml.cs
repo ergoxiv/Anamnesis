@@ -245,9 +245,9 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 				var importPoseInternal = (bool retryApply) =>
 				{
 					PoseService.Instance.SetEnabled(true);
-					PoseService.Instance.FreezeScale |= mode.HasFlagUnsafe(PoseMode.Scale);
-					PoseService.Instance.FreezeRotation |= mode.HasFlagUnsafe(PoseMode.Rotation);
-					PoseService.Instance.FreezePositions |= mode.HasFlagUnsafe(PoseMode.Position);
+					PoseService.Instance.IsEnabled |= mode.HasFlagUnsafe(PoseMode.Scale);
+					PoseService.Instance.IsEnabled |= mode.HasFlagUnsafe(PoseMode.Rotation);
+					PoseService.Instance.IsEnabled |= mode.HasFlagUnsafe(PoseMode.Position);
 
 					if (importOption == PoseImportOptions.SelectedBones)
 					{

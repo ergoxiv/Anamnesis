@@ -696,6 +696,48 @@ public class ControllerService : ServiceBase<ControllerService>
 		return this.UnregisterHookById(handle.HookId, timeoutMs);
 	}
 
+	/// <summary>
+	/// Sends a driver command and returns a typed result.
+	/// </summary>
+	/// <typeparam name="TResult">The expected return type.</typeparam>
+	/// <param name="command">The driver command.</param>
+	/// <param name="args">Arguments to serialize and send.</param>
+	/// <returns>The deserialized result, or null if the call failed.</returns>
+	public TResult? SendDriverCommand<TResult>(DriverCommand command, params object[] args)
+		where TResult : unmanaged
+	{
+		byte[] response = this.SendDriverCommandRaw(command, args);
+		if (response.Length < Unsafe.SizeOf<TResult>())
+			return null;
+
+		return MarshalUtils.Deserialize<TResult>(response);
+	}
+
+	/// <summary>
+	/// Sends a raw driver command with serialized arguments.
+	/// </summary>
+	/// <param name="command">The driver command.</param>
+	/// <param name="args">Arguments to serialize.</param>
+	/// <returns>Raw response bytes, or empty array on failure.</returns>
+	public byte[] SendDriverCommandRaw(DriverCommand command, params object[] args)
+	{
+		if (this.outgoingEndpoint == null || !this.isConnected)
+			return [];
+
+		int argsSize = MarshalUtils.ComputeArgsSize(args);
+		int payloadSize = sizeof(int) + argsSize;
+
+		Span<byte> payload = payloadSize <= 256
+			? stackalloc byte[payloadSize]
+			: new byte[payloadSize];
+
+		MarshalUtils.Write(payload, (int)command);
+		if (argsSize > 0)
+			MarshalUtils.SerializeArgs(payload[sizeof(int)..], args);
+
+		return this.SendDriverCommandInternal(payload);
+	}
+
 	internal static void ClearActiveBatch()
 	{
 		s_currentBatch = null;
@@ -955,6 +997,36 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 	}
 
+	private byte[] SendDriverCommandInternal(ReadOnlySpan<byte> payload)
+	{
+		byte seq = this.GetNextSequence(HookMessageId.DRIVER_COMMAND_ID);
+		uint msgId = HookMessageId.Pack(HookMessageId.DRIVER_COMMAND_ID, seq);
+
+		var pending = this.wrapperRequestPool.Get();
+		this.pendingHookRequests[msgId] = pending;
+
+		try
+		{
+			var header = new MessageHeader(msgId, PayloadType.Request, (ulong)payload.Length);
+			if (!this.outgoingEndpoint!.Write(header, payload, IPC_TIMEOUT_MS))
+				return [];
+
+			if (!pending.Wait(IPC_TIMEOUT_MS))
+				return [];
+
+			if (!pending.TryGetResult(out byte[]? result) || result == null)
+				return [];
+
+			return result;
+		}
+		finally
+		{
+			this.pendingHookRequests.TryRemove(msgId, out _);
+			pending.Reset();
+			this.wrapperRequestPool.Return(pending);
+		}
+	}
+
 	private Task SendPendingRegistrations()
 	{
 		// Process the entire queue
@@ -1026,7 +1098,14 @@ public class ControllerService : ServiceBase<ControllerService>
 					if (this.framework != null)
 					{
 						this.framework.Active = true;
-						this.RegisterFrameworkHook();
+						this.handlers[HookMessageId.FRAMEWORK_SYSTEM_ID] = _ =>
+						{
+							if (this.framework == null)
+								return [0];
+
+							bool keepSyncing = this.framework?.ProcessTick() ?? false;
+							return [keepSyncing ? (byte)1 : (byte)0];
+						};
 					}
 
 					this.isConnected = true;
@@ -1226,81 +1305,6 @@ public class ControllerService : ServiceBase<ControllerService>
 
 		var header = new MessageHeader(msgId, PayloadType.Blob, (ulong)response.Length);
 		this.outgoingEndpoint.Write(header, response, IPC_TIMEOUT_MS);
-	}
-
-	private void RegisterFrameworkHook()
-	{
-		if (this.outgoingEndpoint == null)
-			throw new InvalidOperationException("Controller service not initialized.");
-
-		Type delType = typeof(RemoteController.Interop.Delegates.Framework.Tick);
-		string delegateKey = HookUtils.GetKey(delType);
-
-		if (this.delegateKeyToHookId.ContainsKey(delegateKey))
-		{
-			Log.Warning($"Hook already registered for: {delegateKey}");
-			return;
-		}
-
-		var registerPayload = new HookRegistrationData
-		{
-			HookType = HookType.System,
-			HookBehavior = HookBehavior.After, // Ignored
-			DelegateKeyLength = delegateKey.Length,
-			HookId = HookMessageId.FRAMEWORK_SYSTEM_ID,
-		};
-		registerPayload.SetKey(delegateKey);
-
-		byte[] payload = MarshalUtils.Serialize(registerPayload);
-		uint requestId = this.GetNextRequestId();
-
-		using var pending = new PendingRequest<uint>();
-		this.pendingRegistrations[requestId] = pending;
-		try
-		{
-			var header = new MessageHeader(requestId, PayloadType.Register, (ulong)payload.Length);
-
-			if (!this.outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS))
-			{
-				Log.Error($"Failed to send hook registration request for: {delegateKey}");
-				return;
-			}
-
-			if (!pending.Wait(IPC_REGISTER_TIMEOUT_MS))
-			{
-				Log.Error($"Hook registration timed out for: {delegateKey}");
-				return;
-			}
-
-			if (!pending.TryGetResult(out uint hookId) || hookId == 0)
-			{
-				Log.Error($"Hook registration failed for: {delegateKey}");
-				return;
-			}
-
-			// Payload: [1] = Keep Syncing, [0] = Stop Syncing
-			this.handlers[HookMessageId.FRAMEWORK_SYSTEM_ID] = _ =>
-			{
-				if (this.framework == null)
-					return [0];
-
-				bool keepSyncing = this.framework?.ProcessTick() ?? false;
-				return [keepSyncing ? (byte)1 : (byte)0];
-			};
-
-			this.delegateKeyToHookId[delegateKey] = hookId;
-			Log.Information($"Registered hook[ID: {hookId}] for: {delegateKey}");
-			return;
-		}
-		catch (Exception ex)
-		{
-			Log.Error(ex, $"Exception during IPC registration for {delegateKey}");
-			return;
-		}
-		finally
-		{
-			this.pendingRegistrations.TryRemove(requestId, out _);
-		}
 	}
 
 	private void SendFrameworkSyncRequest()

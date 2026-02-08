@@ -288,7 +288,7 @@ public class TargetService : ServiceBase<TargetService>
 	{
 		GposeService.GposeStateChanged -= this.GposeService_GposeStateChanged;
 		PoseService.EnabledChanged -= this.PoseService_EnabledChanged;
-		PoseService.FreezeWorldPositionsEnabledChanged -= this.PoseService_EnabledChanged;
+		PoseService.FreezeWorldStateEnabledChanged -= this.PoseService_EnabledChanged;
 		return base.Shutdown();
 	}
 
@@ -431,7 +431,7 @@ public class TargetService : ServiceBase<TargetService>
 	{
 		GposeService.GposeStateChanged += this.GposeService_GposeStateChanged;
 		PoseService.EnabledChanged += this.PoseService_EnabledChanged;
-		PoseService.FreezeWorldPositionsEnabledChanged += this.PoseService_EnabledChanged;
+		PoseService.FreezeWorldStateEnabledChanged += this.PoseService_EnabledChanged;
 
 		if (GameService.GetIsSignedIn())
 		{

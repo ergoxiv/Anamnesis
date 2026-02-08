@@ -6,6 +6,7 @@ namespace Anamnesis.Services;
 using Anamnesis.Core;
 using PropertyChanged;
 using RemoteController.Interop.Delegates;
+using RemoteController.IPC;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,8 +18,6 @@ using System.Threading.Tasks;
 public class GposeService : ServiceBase<GposeService>
 {
 	private const int TASK_DELAY_MS = 1000;
-
-	private static HookHandle? s_isInGposeHook = null;
 
 	/// <summary>
 	/// The delegate object for the <see cref="GposeService.GposeStateChanged"/> event.
@@ -48,21 +47,18 @@ public class GposeService : ServiceBase<GposeService>
 	/// <returns>True if the user is in GPose, false otherwise.</returns>
 	public static bool? IsInGpose()
 	{
-		if (s_isInGposeHook == null || !s_isInGposeHook.IsValid)
-			return false;
-
 		bool? result = null;
 		try
 		{
-			result = ControllerService.Instance.InvokeHook<bool>(s_isInGposeHook, timeoutMs: 250);
+			result = ControllerService.Instance.SendDriverCommand<bool>(DriverCommand.GetIsInGpose);
 			if (result == null)
 			{
-				Log.Warning("Gpose check hook did not return a result.");
+				Log.Warning("GPose driver command did not return a result.");
 			}
 		}
 		catch
 		{
-			Log.Verbose($"Failed to invoke 'IsGpose' hook.");
+			Log.Verbose("Failed to query GPose state via driver command.");
 		}
 
 		return result;
@@ -71,8 +67,6 @@ public class GposeService : ServiceBase<GposeService>
 	/// <inheritdoc/>
 	protected override async Task OnStart()
 	{
-		s_isInGposeHook ??= ControllerService.Instance.RegisterWrapper<GameMain.IsInGPose>();
-
 		this.CancellationTokenSource = new CancellationTokenSource();
 		this.BackgroundTask = Task.Run(() => this.CheckThread(this.CancellationToken));
 		await base.OnStart();

@@ -284,8 +284,6 @@
   "Character_Action_AnimationOverrideSpeedBlocked": "仅在集体动作模式中可用。",
   "Character_Action_AnimationOverrideSpeedControlDisable": "仅当启用速度控制时可用",
   "Character_Action_AnimationOverrideGposeFrozen": "角色动作已在集体动作模式中冻结",
-  "Character_Action_GlobalFreezeWorldPositions": "冻结位置",
-  "Character_Action_GlobalFreezeWorldPositionsTooltip": "冻结角色/相机的世界位置",
   "Character_Action_GlobalSpeedControl": "速度控制",
   "Character_Action_GlobalAllActorSpeedControl": "所有角色控制",
   "Character_Action_LinkSpeed": "将速度控制链接到所有动画",

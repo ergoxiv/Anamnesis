@@ -3,6 +3,7 @@
 
 namespace RemoteController;
 
+using RemoteController.Drivers;
 using RemoteController.Interop;
 using RemoteController.IPC;
 using RemoteController.Memory;
@@ -44,13 +45,47 @@ public class Controller
 	private static readonly WorkPipeline s_workPipeline = new(Math.Max(Environment.ProcessorCount / 2, 1));
 	private static readonly ObjectPool<WorkItem<(uint, byte[], int)>> s_workItemPool = new(maxSize: 128);
 
+	private static readonly Dictionary<DriverCommand, Func<ReadOnlySpan<byte>, byte[]>> s_commandHandlers = new()
+	{
+		// Posing driver commands
+		[DriverCommand.GetPosingEnabled] = DriverCommandHandler.ConditionalGetter(
+			() => PosingDriver.IsInitialized,
+			() => PosingDriver.Instance.PosingEnabled),
+
+		[DriverCommand.SetPosingEnabled] = DriverCommandHandler.ConditionalSetter<bool>(
+			() => PosingDriver.IsInitialized,
+			v => PosingDriver.Instance.PosingEnabled = v),
+
+		[DriverCommand.GetFreezePhysics] = DriverCommandHandler.ConditionalGetter(
+			() => PosingDriver.IsInitialized,
+			() => PosingDriver.Instance.FreezePhysics),
+
+		[DriverCommand.SetFreezePhysics] = DriverCommandHandler.ConditionalSetter<bool>(
+			() => PosingDriver.IsInitialized,
+			v => PosingDriver.Instance.FreezePhysics = v),
+
+		[DriverCommand.GetFreezeWorldVisualState] = DriverCommandHandler.ConditionalGetter(
+			() => PosingDriver.IsInitialized,
+			() => PosingDriver.Instance.FreezeWorldVisualState),
+
+		[DriverCommand.SetFreezeWorldVisualState] = DriverCommandHandler.ConditionalSetter<bool>(
+			() => PosingDriver.IsInitialized,
+			v => PosingDriver.Instance.FreezeWorldVisualState = v),
+
+		// Gpose driver commands
+		[DriverCommand.GetIsInGpose] = DriverCommandHandler.ConditionalGetter(
+			() => GposeDriver.IsInitialized,
+			() => GposeDriver.Instance.IsInGpose),
+	};
+
+#pragma warning disable CA2211
 	public static SignatureScanner? Scanner = null;
 	public static SignatureResolver? SigResolver = null;
-	private static FrameworkDriver? s_frameworkDriver = null;
+#pragma warning restore CA2211
 
+	private static DriverManager? s_driverManager = null;
 	private static Endpoint? s_outgoingEndpoint = null;
 	private static Endpoint? s_incomingEndpoint = null;
-
 	private static long s_heartbeatTimestamp = 0;
 	private static Timer? s_watchdogTimer;
 	private static volatile bool s_running = true;
@@ -266,6 +301,9 @@ public class Controller
 			s_heartbeatTimestamp = Environment.TickCount64;
 			s_watchdogTimer = new Timer(CheckWatchdog, null, WATCHDOG_TIMER_INTERVAL_MS, WATCHDOG_TIMER_INTERVAL_MS);
 
+			s_driverManager = new DriverManager();
+			s_driverManager.Initialize();
+
 			// Main loop
 			while (s_running)
 			{
@@ -367,8 +405,8 @@ public class Controller
 	{
 		Log.Information("Running shutdown sequence...");
 		HookRegistry.Instance.UnregisterAll();
-		s_frameworkDriver?.Dispose();
-		s_frameworkDriver = null;
+		s_driverManager?.Dispose();
+		s_driverManager = null;
 		s_watchdogTimer?.Dispose();
 		s_outgoingEndpoint?.Dispose();
 		s_outgoingEndpoint = null;
@@ -405,13 +443,14 @@ public class Controller
 				switch (header.Type)
 				{
 					case PayloadType.Request:
-						if (HookMessageId.GetHookId(header.Id) != HookMessageId.FRAMEWORK_SYSTEM_ID)
 						{
-							HandleWrapperInvoke(header.Id, payload);
-						}
-						else
-						{
-							HandleFrameworkCommand(header.Id, payload);
+							uint hookId = HookMessageId.GetHookId(header.Id);
+							if (hookId == HookMessageId.DRIVER_COMMAND_ID)
+								HandleDriverCommand(header.Id, payload);
+							else if (hookId == HookMessageId.FRAMEWORK_SYSTEM_ID)
+								HandleFrameworkCommand(header.Id, payload);
+							else
+								HandleWrapperInvoke(header.Id, payload);
 						}
 						break;
 
@@ -465,44 +504,11 @@ public class Controller
 			return;
 		}
 
-		var regPayload = MemoryMarshal.Read<HookRegistrationData>(data);
-		string delegateKey = regPayload.GetKey();
-
-		if (regPayload.HookType == HookType.System)
+		try
 		{
-			// Handle system hook registration
-			nint address = SigResolver?.Resolve(delegateKey) ?? 0;
-			try
-			{
-				if (address == 0)
-					throw new Exception($"Failed to resolve address for delegate key: {delegateKey}.");
-
-				if (regPayload.HookId == HookMessageId.FRAMEWORK_SYSTEM_ID)
-				{
-					s_frameworkDriver?.Dispose();
-					s_frameworkDriver = new FrameworkDriver(address);
-					Log.Information($"Framework driver registered at 0x{address:X}.");
-					byte[] payload = BitConverter.GetBytes(HookMessageId.FRAMEWORK_SYSTEM_ID);
-					var header = new MessageHeader(requestId, PayloadType.Ack, (ulong)payload.Length);
-					s_outgoingEndpoint?.Write(header, payload, IPC_TIMEOUT_MS);
-				}
-				else
-				{
-					Log.Warning($"Unknown system hook ID: {regPayload.HookId}. Failed registration.");
-					SendResponse(requestId, PayloadType.NAck);
-				}
-			}
-			catch (Exception ex)
-			{
-				Log.Error(ex, $"Failed to register system hook with request ID {requestId}.");
-				SendResponse(requestId, PayloadType.NAck);
-			}
-		}
-		else
-		{
-			// Handle standard hook registration
+			var regPayload = MemoryMarshal.Read<HookRegistrationData>(data);
+			string delegateKey = regPayload.GetKey();
 			uint hookId = HookRegistry.Instance.RegisterHook(regPayload);
-
 			if (hookId != 0)
 			{
 				byte[] payload = BitConverter.GetBytes(hookId);
@@ -513,6 +519,10 @@ public class Controller
 			{
 				SendResponse(requestId, PayloadType.NAck);
 			}
+		}
+		catch (Exception ex)
+		{
+			Log.Error(ex, $"Unhandled exception when registering hook.");
 		}
 	}
 
@@ -530,6 +540,15 @@ public class Controller
 
 		var header = new MessageHeader(msgId, responseType);
 		s_outgoingEndpoint.Write(header, IPC_TIMEOUT_MS);
+	}
+
+	private static void SendResponse(uint msgId, ReadOnlySpan<byte> payload, PayloadType responseType = PayloadType.Blob)
+	{
+		if (s_outgoingEndpoint == null)
+			return;
+		
+		var header = new MessageHeader(msgId, responseType, (ulong)payload.Length);
+		s_outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS);
 	}
 
 	private static void ProcessInvokeInternal((uint MsgId, byte[] Data, int Length) state)
@@ -551,7 +570,7 @@ public class Controller
 					return ProcessInvokeBatch(args);
 			}
 
-			if (mode == DispatchMode.FrameworkTick)
+			if (mode == DispatchMode.FrameworkTick && FrameworkDriver.IsInitialized)
 			{
 				result = FrameworkDriver.EnqueueAndWait(ExecuteLogic);
 			}
@@ -679,9 +698,9 @@ public class Controller
 
 		if (msg.Type == FrameworkMessageType.EnableTickSync)
 		{
-			if (s_frameworkDriver != null)
+			if (FrameworkDriver.IsInitialized)
 			{
-				s_frameworkDriver.IsSyncEnabled = true;
+				FrameworkDriver.Instance.IsSyncEnabled = true;
 				SendResponse(msgId, PayloadType.Ack);
 				return;
 			}
@@ -692,6 +711,39 @@ public class Controller
 		}
 
 		SendResponse(msgId, PayloadType.NAck);
+	}
+
+	private static void HandleDriverCommand(uint msgId, ReadOnlySpan<byte> payload)
+	{
+		if (payload.Length < sizeof(int))
+		{
+			SendResponse(msgId, []);
+			return;
+		}
+
+		DriverCommand commandId = MarshalUtils.Read<DriverCommand>(payload);
+		ReadOnlySpan<byte> args = payload[sizeof(int)..];
+
+		byte[] response;
+		if (s_commandHandlers.TryGetValue(commandId, out var handler))
+		{
+			try
+			{
+				response = handler(args);
+			}
+			catch (Exception ex)
+			{
+				Log.Error(ex, $"Error executing driver command: 0x{commandId:X4}");
+				response = [];
+			}
+		}
+		else
+		{
+			Log.Warning($"Unknown driver command: 0x{commandId:X4}");
+			response = [];
+		}
+
+		SendResponse(msgId, response);
 	}
 
 	private static void HandleGoodbyeMessage(uint msgId)

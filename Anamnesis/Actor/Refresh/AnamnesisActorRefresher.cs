@@ -26,7 +26,7 @@ public class AnamnesisActorRefresher : IActorRefresher
 			return false;
 
 		// Ana can't refresh world frozen actors
-		if (PoseService.Instance.FreezeWorldPosition)
+		if (PoseService.Instance.FreezeWorldState)
 			return false;
 
 		return true;

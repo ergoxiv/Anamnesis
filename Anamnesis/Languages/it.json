@@ -284,8 +284,6 @@
   "Character_Action_AnimationOverrideSpeedBlocked": "Disponibile solo in GPose.",
   "Character_Action_AnimationOverrideSpeedControlDisable": "Disponibile solo quando il controllo velocità è attivo.",
   "Character_Action_AnimationOverrideGposeFrozen": "Le Animazioni dell'attore sono bloccate da GPose",
-  "Character_Action_GlobalFreezeWorldPositions": "Blocca posizioni",
-  "Character_Action_GlobalFreezeWorldPositionsTooltip": "Blocca Posizioni globali dell'attore/camera",
   "Character_Action_GlobalSpeedControl": "Controllo Velocità",
   "Character_Action_GlobalAllActorSpeedControl": "Controllo di tutti gli Attori",
   "Character_Action_LinkSpeed": "Link speed control for all animation slots",
