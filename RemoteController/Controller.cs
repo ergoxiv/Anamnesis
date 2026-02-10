@@ -39,7 +39,7 @@ public class Controller
 	private static readonly byte[] s_emptyPayload = [];
 	private static readonly ArrayPool<byte> s_bufferPool = ArrayPool<byte>.Shared;
 	private static readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> s_pendingHooks = new();
-	private static readonly ConcurrentDictionary<uint, byte> s_sequenceCounters = new(); // Key: Packed hook ID, Value: Sequence counter
+	private static readonly ConcurrentDictionary<uint, ushort> s_sequenceCounters = new(); // Key: Packed hook ID, Value: Sequence counter
 	private static readonly ConcurrentDictionary<EventId, int> s_eventSubscriptionRefCount = new();
 	private static readonly ObjectPool<PendingRequest<byte[]>> s_pendingRequestPool = new(maxSize: 128);
 
@@ -118,7 +118,7 @@ public class Controller
 		if (!s_running || s_outgoingEndpoint == null)
 			return s_emptyPayload;
 
-		byte seq = GetNextSequence(hookIndex);
+		ushort seq = GetNextSequence(hookIndex);
 		uint msgId = HookMessageId.Pack(hookIndex, seq);
 
 		var pending = s_pendingRequestPool.Get();
@@ -166,7 +166,7 @@ public class Controller
 		if (!s_running || s_outgoingEndpoint == null)
 			return false;
 
-		byte seq = GetNextSequence(HookMessageId.FRAMEWORK_SYSTEM_ID);
+		ushort seq = GetNextSequence(HookMessageId.FRAMEWORK_SYSTEM_ID);
 		uint msgId = HookMessageId.Pack(HookMessageId.FRAMEWORK_SYSTEM_ID, seq);
 
 		var pending = s_pendingRequestPool.Get();
@@ -891,8 +891,8 @@ public class Controller
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static byte GetNextSequence(uint hookIndex)
+	private static ushort GetNextSequence(uint hookIndex)
 	{
-		return s_sequenceCounters.AddOrUpdate(hookIndex, 1, s_incrementFunc);
+		return (ushort)s_sequenceCounters.AddOrUpdate(hookIndex, 1, (_, v) => (ushort)((v + 1) & HookMessageId.MAX_SEQ_NUM));
 	}
 }

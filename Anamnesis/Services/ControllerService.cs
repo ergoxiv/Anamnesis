@@ -370,7 +370,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	private readonly ConcurrentDictionary<uint, PendingRequest<uint>> pendingRegistrations = new();
 	private readonly ConcurrentDictionary<uint, PendingRequest<bool>> pendingUnregistrations = new();
 	private readonly ConcurrentDictionary<uint, Func<ReadOnlySpan<byte>, byte[]>> handlers = new();
-	private readonly ConcurrentDictionary<uint, byte> sequenceCounters = new();
+	private readonly ConcurrentDictionary<uint, ushort> sequenceCounters = new();
 	private readonly ConcurrentDictionary<string, uint> delegateKeyToHookId = new();
 	private readonly ObjectPool<PendingRequest<byte[]>> wrapperRequestPool = new(maxSize: 128);
 	private readonly PendingRequest<bool> pendingByeMessage = new();
@@ -492,7 +492,7 @@ public class ControllerService : ServiceBase<ControllerService>
 			return default;
 		}
 
-		byte seq = this.GetNextSequence(hookId);
+		ushort seq = this.GetNextSequence(hookId);
 		uint msgId = HookMessageId.Pack(hookId, seq);
 
 		var pending = this.wrapperRequestPool.Get();
@@ -1164,7 +1164,7 @@ public class ControllerService : ServiceBase<ControllerService>
 
 	private byte[] SendDriverCommandInternal(ReadOnlySpan<byte> payload)
 	{
-		byte seq = this.GetNextSequence(HookMessageId.DRIVER_COMMAND_ID);
+		ushort seq = this.GetNextSequence(HookMessageId.DRIVER_COMMAND_ID);
 		uint msgId = HookMessageId.Pack(HookMessageId.DRIVER_COMMAND_ID, seq);
 
 		var pending = this.wrapperRequestPool.Get();
@@ -1656,7 +1656,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		int payloadSize = Unsafe.SizeOf<FrameworkMessageData>();
 		var header = new MessageHeader(HookMessageId.FRAMEWORK_SYSTEM_ID, PayloadType.Request, (ulong)payloadSize);
 
-		byte seq = this.GetNextSequence(HookMessageId.FRAMEWORK_SYSTEM_ID);
+		ushort seq = this.GetNextSequence(HookMessageId.FRAMEWORK_SYSTEM_ID);
 		uint msgId = HookMessageId.Pack(HookMessageId.FRAMEWORK_SYSTEM_ID, seq);
 		var pending = new PendingRequest<byte[]>();
 		this.pendingHookRequests[msgId] = pending;
@@ -1701,9 +1701,9 @@ public class ControllerService : ServiceBase<ControllerService>
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private byte GetNextSequence(uint hookIndex)
+	private ushort GetNextSequence(uint hookIndex)
 	{
-		return this.sequenceCounters.AddOrUpdate(hookIndex, 1, s_incrementFunc);
+		return (ushort)this.sequenceCounters.AddOrUpdate(hookIndex, 1, (_, v) => (ushort)((v + 1) & HookMessageId.MAX_SEQ_NUM));
 	}
 
 	private void SendShutdownMessage()
