@@ -375,6 +375,8 @@ public class ControllerService : ServiceBase<ControllerService>
 	private readonly ObjectPool<PendingRequest<byte[]>> wrapperRequestPool = new(maxSize: 128);
 	private readonly PendingRequest<bool> pendingByeMessage = new();
 
+	private readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> pendingDriverCommands = new();
+
 	private readonly ConcurrentDictionary<EventId, HashSet<Action<ReadOnlySpan<byte>>>> eventHandlers = new();
 	private readonly ConcurrentDictionary<EventId, PendingRequest<bool>> pendingEventSubscriptions = new();
 	private readonly ConcurrentDictionary<EventId, PendingRequest<bool>> pendingEventUnsubscriptions = new();
@@ -440,6 +442,9 @@ public class ControllerService : ServiceBase<ControllerService>
 		foreach (var kvp in this.pendingEventUnsubscriptions)
 			kvp.Value.Dispose();
 
+		foreach (var kvp in this.pendingDriverCommands)
+			kvp.Value.Dispose();
+
 		// NOTE: No need to unsubscribe from events since the remote controller will
 		// automatically clean up all subscriptions as part of its own shutdown process
 
@@ -449,6 +454,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		this.allHooks.Clear();
 		this.pendingEventSubscriptions.Clear();
 		this.pendingEventUnsubscriptions.Clear();
+		this.pendingDriverCommands.Clear();
 		this.outgoingEndpoint?.Dispose();
 		this.incomingEndpoint?.Dispose();
 		await base.Shutdown();
@@ -1164,15 +1170,13 @@ public class ControllerService : ServiceBase<ControllerService>
 
 	private byte[] SendDriverCommandInternal(ReadOnlySpan<byte> payload)
 	{
-		ushort seq = this.GetNextSequence(HookMessageId.DRIVER_COMMAND_ID);
-		uint msgId = HookMessageId.Pack(HookMessageId.DRIVER_COMMAND_ID, seq);
-
+		uint requestId = this.GetNextRequestId();
 		var pending = this.wrapperRequestPool.Get();
-		this.pendingHookRequests[msgId] = pending;
+		this.pendingDriverCommands[requestId] = pending;
 
 		try
 		{
-			var header = new MessageHeader(msgId, PayloadType.Request, (ulong)payload.Length);
+			var header = new MessageHeader(requestId, PayloadType.Command, (ulong)payload.Length);
 			if (!this.outgoingEndpoint!.Write(header, payload, IPC_TIMEOUT_MS))
 				return [];
 
@@ -1186,7 +1190,7 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 		finally
 		{
-			this.pendingHookRequests.TryRemove(msgId, out _);
+			this.pendingDriverCommands.TryRemove(requestId, out _);
 			pending.Reset();
 			this.wrapperRequestPool.Return(pending);
 		}
@@ -1541,14 +1545,19 @@ public class ControllerService : ServiceBase<ControllerService>
 
 	private void HandleHookReturn(uint msgId, ReadOnlySpan<byte> resultData)
 	{
+		if (this.pendingDriverCommands.TryGetValue(msgId, out var driverPending))
+		{
+			driverPending.SetResult(resultData.ToArray());
+			return;
+		}
+
 		if (this.pendingHookRequests.TryGetValue(msgId, out var pending))
 		{
 			pending.SetResult(resultData.ToArray());
+			return;
 		}
-		else
-		{
-			Log.Warning($"Received hook result for unknown request: {msgId}");
-		}
+
+		Log.Warning($"Received hook result for unknown request: {msgId}");
 	}
 
 	private void EnqueueHookRequest(uint msgId, ReadOnlySpan<byte> payload)

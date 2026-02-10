@@ -496,13 +496,15 @@ public class Controller
 					case PayloadType.Request:
 						{
 							uint hookId = HookMessageId.GetHookId(header.Id);
-							if (hookId == HookMessageId.DRIVER_COMMAND_ID)
-								HandleDriverCommand(header.Id, payload);
-							else if (hookId == HookMessageId.FRAMEWORK_SYSTEM_ID)
+							if (hookId == HookMessageId.FRAMEWORK_SYSTEM_ID)
 								HandleFrameworkCommand(header.Id, payload);
 							else
 								HandleWrapperInvoke(header.Id, payload);
 						}
+						break;
+
+					case PayloadType.Command:
+						HandleDriverCommand(header.Id, payload);
 						break;
 
 					case PayloadType.Blob:

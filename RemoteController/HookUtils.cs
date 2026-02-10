@@ -40,11 +40,10 @@ public static class HookMessageId
 	public const uint MAX_SEQ_NUM = 0xFFF;      // 12 bits (4,095)
 
 	// Special-case message identifiers
-	public const int SPECIAL_HOOK_COUNT = 4;
+	public const int SPECIAL_HOOK_COUNT = 3;
 	public const uint FRAMEWORK_SYSTEM_ID = MAX_HOOK_ID - 1;
 	public const uint BATCH_HOOK_ID = FRAMEWORK_SYSTEM_ID - 1;
-	public const uint DRIVER_COMMAND_ID = BATCH_HOOK_ID - 1;
-	public const uint GOODBYE_MESSAGE_ID = DRIVER_COMMAND_ID - 1;
+	public const uint GOODBYE_MESSAGE_ID = BATCH_HOOK_ID - 1;
 
 	// Maximum hook identifier for non-specialized hooks.
 	public const uint MAX_STANDARD_HOOK_ID = MAX_HOOK_ID - SPECIAL_HOOK_COUNT - 1;
