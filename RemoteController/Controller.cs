@@ -40,6 +40,7 @@ public class Controller
 	private static readonly ArrayPool<byte> s_bufferPool = ArrayPool<byte>.Shared;
 	private static readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> s_pendingHooks = new();
 	private static readonly ConcurrentDictionary<uint, byte> s_sequenceCounters = new(); // Key: Packed hook ID, Value: Sequence counter
+	private static readonly ConcurrentDictionary<EventId, int> s_eventSubscriptionRefCount = new();
 	private static readonly ObjectPool<PendingRequest<byte[]>> s_pendingRequestPool = new(maxSize: 128);
 
 	private static readonly WorkPipeline s_workPipeline = new(Math.Max(Environment.ProcessorCount / 2, 1));
@@ -219,6 +220,55 @@ public class Controller
 			s_pendingHooks.TryRemove(msgId, out _);
 			pending.Reset();
 			s_pendingRequestPool.Return(pending);
+		}
+	}
+
+	/// <summary>
+	/// Publishes an event to the main application if at least one subscriber exists.
+	/// </summary>
+	/// <typeparam name="T">The event payload type.</typeparam>
+	/// <param name="eventId">The event identifier.</param>
+	/// <param name="data">The event payload data.</param>
+	public static void PublishEvent<T>(EventId eventId, T data)
+		where T : unmanaged
+	{
+		if (!s_running || s_outgoingEndpoint == null)
+			return;
+
+		// Check if anyone is subscribed
+		if (!s_eventSubscriptionRefCount.TryGetValue(eventId, out int refCount) || refCount <= 0)
+			return;
+
+		int payloadSize = Unsafe.SizeOf<T>();
+		bool result = false;
+		byte[]? rented = null;
+		var header = new MessageHeader((uint)eventId, PayloadType.Event, (ulong)payloadSize);
+
+		try
+		{
+			if (payloadSize <= STACKALLOC_THRESHOLD)
+			{
+				Span<byte> payload = stackalloc byte[payloadSize];
+				MarshalUtils.Write(payload, in data);
+				result = s_outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS);
+			}
+			else
+			{
+				rented = ArrayPool<byte>.Shared.Rent(payloadSize);
+				Span<byte> rentedSpan = rented.AsSpan(0, payloadSize);
+				MarshalUtils.Write(rentedSpan, in data);
+				result = s_outgoingEndpoint.Write(header, rentedSpan, IPC_TIMEOUT_MS);
+			}
+
+			if (!result)
+			{
+				Log.Verbose($"Failed to publish event {eventId}.");
+			}
+		}
+		finally
+		{
+			if (rented != null)
+				ArrayPool<byte>.Shared.Return(rented);
 		}
 	}
 
@@ -412,6 +462,7 @@ public class Controller
 		s_outgoingEndpoint = null;
 		s_incomingEndpoint?.Dispose();
 		s_incomingEndpoint = null;
+		s_eventSubscriptionRefCount.Clear();
 
 		Log.Information("Shutdown complete. Remember us...Remember...that we once lived.");
 		Logger.Deinitialize(); // Keep the logger as the last step
@@ -475,6 +526,16 @@ public class Controller
 					case PayloadType.Unregister:
 						Log.Verbose("Received unregister hook message.");
 						HandleHookUnregister(header.Id);
+						break;
+
+					case PayloadType.EventSubscribe:
+						Log.Verbose("Received event subscribe message.");
+						HandleEventSubscribe(header.Id, payload);
+						break;
+
+					case PayloadType.EventUnsubscribe:
+						Log.Verbose("Received event unsubscribe message.");
+						HandleEventUnsubscribe(header.Id, payload);
 						break;
 
 					default:
@@ -744,6 +805,76 @@ public class Controller
 		}
 
 		SendResponse(msgId, response);
+	}
+
+	private static void HandleEventSubscribe(uint messageId, ReadOnlySpan<byte> payload)
+	{
+		if (payload.Length < Unsafe.SizeOf<EventSubscriptionData>())
+		{
+			SendResponse(messageId, PayloadType.NAck);
+			return;
+		}
+
+		try
+		{
+			var data = MemoryMarshal.Read<EventSubscriptionData>(payload);
+
+			// Increment refcount
+			int newCount = s_eventSubscriptionRefCount.AddOrUpdate(
+				data.EventId,
+				addValue: 1,
+				updateValueFactory: (_, current) => ++current);
+
+			Log.Information($"Event subscription added: {data.EventId} (refcount: {newCount})");
+			SendResponse(messageId, PayloadType.Ack);
+		}
+		catch (Exception ex)
+		{
+			Log.Error(ex, "Error handling event subscribe message.");
+			SendResponse(messageId, PayloadType.NAck);
+		}
+	}
+
+	private static void HandleEventUnsubscribe(uint messageId, ReadOnlySpan<byte> payload)
+	{
+		if (payload.Length < Unsafe.SizeOf<EventSubscriptionData>())
+		{
+			SendResponse(messageId, PayloadType.NAck);
+			return;
+		}
+
+		try
+		{
+			var data = MemoryMarshal.Read<EventSubscriptionData>(payload);
+
+			if (data.Flags.HasFlag(EventSubscriptionFlags.UnsubscribeAll))
+			{
+				s_eventSubscriptionRefCount.TryRemove(data.EventId, out int previousCount);
+				Log.Information($"Unsubscribed all from event: {data.EventId} (cleared refcount from {previousCount})");
+			}
+			else
+			{
+				// Decrement refcount
+				int newCount = s_eventSubscriptionRefCount.AddOrUpdate(
+					data.EventId,
+					addValue: 0,
+					updateValueFactory: (_, current) => Math.Max(0, --current));
+
+				if (newCount == 0)
+				{
+					s_eventSubscriptionRefCount.TryRemove(data.EventId, out _);
+				}
+
+				Log.Information($"Event subscription removed: {data.EventId} (refcount: {newCount})");
+			}
+
+			SendResponse(messageId, PayloadType.Ack);
+		}
+		catch (Exception ex)
+		{
+			Log.Error(ex, "Error handling event unsubscribe message.");
+			SendResponse(messageId, PayloadType.NAck);
+		}
 	}
 
 	private static void HandleGoodbyeMessage(uint msgId)

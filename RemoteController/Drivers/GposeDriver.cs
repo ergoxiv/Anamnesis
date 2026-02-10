@@ -5,6 +5,7 @@ namespace RemoteController.Drivers;
 
 using RemoteController.Interop;
 using RemoteController.Interop.Delegates;
+using RemoteController.IPC;
 using System.Diagnostics.CodeAnalysis;
 
 /// <summary>
@@ -44,6 +45,7 @@ public sealed class GposeDriver : DriverBase<GposeDriver>
 
 		this.frameworkDriver = frameworkDriver;
 		this.frameworkDriver.GameTick += this.Update;
+		this.StateChanged += this.OnGposeStateChanged;
 		this.RegisterInstance();
 	}
 
@@ -55,6 +57,7 @@ public sealed class GposeDriver : DriverBase<GposeDriver>
 	/// <inheritdoc/>
 	protected override void OnDispose()
 	{
+		this.StateChanged -= this.OnGposeStateChanged;
 		this.frameworkDriver.GameTick -= this.Update;
 		this.StateChanged = null;
 	}
@@ -70,5 +73,10 @@ public sealed class GposeDriver : DriverBase<GposeDriver>
 			this.isInGpose = newState;
 			this.StateChanged?.Invoke(newState);
 		}
+	}
+
+	private void OnGposeStateChanged(bool newState)
+	{
+		Controller.PublishEvent(EventId.GposeStateChanged, new GposeStateChangedPayload { IsInGpose = newState });
 	}
 }

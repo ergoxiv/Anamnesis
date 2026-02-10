@@ -5,10 +5,8 @@ namespace Anamnesis.Services;
 
 using Anamnesis.Core;
 using PropertyChanged;
-using RemoteController.Interop.Delegates;
 using RemoteController.IPC;
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -17,7 +15,7 @@ using System.Threading.Tasks;
 [AddINotifyPropertyChangedInterface]
 public class GposeService : ServiceBase<GposeService>
 {
-	private const int TASK_DELAY_MS = 1000;
+	private EventSubscription? gposeEventSubsription;
 
 	/// <summary>
 	/// The delegate object for the <see cref="GposeService.GposeStateChanged"/> event.
@@ -39,7 +37,7 @@ public class GposeService : ServiceBase<GposeService>
 	public bool IsGpose { get; private set; } = false;
 
 	/// <inheritdoc/>
-	protected override IEnumerable<IService> Dependencies => [AddressService.Instance, GameService.Instance];
+	protected override IEnumerable<IService> Dependencies => [AddressService.Instance, GameService.Instance, ControllerService.Instance];
 
 	/// <summary>
 	/// Checks if the user is in GPose photo mode by probing the game process' memory.
@@ -65,33 +63,29 @@ public class GposeService : ServiceBase<GposeService>
 	}
 
 	/// <inheritdoc/>
+	public override Task Shutdown()
+	{
+		this.gposeEventSubsription?.Dispose();
+		this.gposeEventSubsription = null;
+		return base.Shutdown();
+	}
+
+	/// <inheritdoc/>
 	protected override async Task OnStart()
 	{
-		this.CancellationTokenSource = new CancellationTokenSource();
-		this.BackgroundTask = Task.Run(() => this.CheckThread(this.CancellationToken));
+		this.gposeEventSubsription = ControllerService.Instance.SubscribeEvent<GposeStateChangedPayload>(
+			EventId.GposeStateChanged,
+			this.OnGposeStateChanged);
+
 		await base.OnStart();
 	}
 
-	private async Task CheckThread(CancellationToken cancellationToken)
+	private void OnGposeStateChanged(GposeStateChangedPayload payload)
 	{
-		while (this.IsInitialized && !cancellationToken.IsCancellationRequested)
+		if (payload.IsInGpose != this.IsGpose)
 		{
-			try
-			{
-				bool? newGpose = IsInGpose();
-				if (newGpose.HasValue && newGpose != this.IsGpose)
-				{
-					this.IsGpose = newGpose.Value;
-					GposeStateChanged?.Invoke(newGpose.Value);
-				}
-
-				await Task.Delay(TASK_DELAY_MS, cancellationToken);
-			}
-			catch (TaskCanceledException)
-			{
-				// Task was canceled, exit the loop.
-				break;
-			}
+			this.IsGpose = payload.IsInGpose;
+			GposeStateChanged?.Invoke(payload.IsInGpose);
 		}
 	}
 }

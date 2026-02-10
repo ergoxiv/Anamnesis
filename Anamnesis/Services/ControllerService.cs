@@ -301,6 +301,46 @@ public class BatchInvokeScope(ControllerService service) : IDisposable
 }
 
 /// <summary>
+/// Represents a handle to an event subscription to a remote controller event.
+/// </summary>
+public sealed class EventSubscription : IDisposable
+{
+	private readonly ControllerService service;
+	private readonly EventId eventId;
+	private readonly Action<ReadOnlySpan<byte>> wrappedHandler;
+	private bool isDisposed;
+
+	internal EventSubscription(ControllerService service, EventId eventId, Action<ReadOnlySpan<byte>> wrappedHandler)
+	{
+		this.service = service;
+		this.eventId = eventId;
+		this.wrappedHandler = wrappedHandler;
+	}
+
+	/// <summary>
+	/// Gets the event ID this subscription is for.
+	/// </summary>
+	public EventId EventId => this.eventId;
+
+	/// <summary>
+	/// Gets a value indicating whether this subscription is still active.
+	/// </summary>
+	public bool IsActive => !this.isDisposed;
+
+	/// <summary>
+	/// Unsubscribes from the event.
+	/// </summary>
+	public void Dispose()
+	{
+		if (this.isDisposed)
+			return;
+
+		this.service.UnsubscribeEventInternal(this.eventId, this.wrappedHandler);
+		this.isDisposed = true;
+	}
+}
+
+/// <summary>
 /// A service that communicates with the remote controller that we inject into the game process.
 /// The service is responsible for sending and receiving messages to and from the controller, including
 /// watchdog heartbeats, and function hook communication.
@@ -335,13 +375,20 @@ public class ControllerService : ServiceBase<ControllerService>
 	private readonly ObjectPool<PendingRequest<byte[]>> wrapperRequestPool = new(maxSize: 128);
 	private readonly PendingRequest<bool> pendingByeMessage = new();
 
-	private readonly WorkPipeline workPipeline = new(Math.Max(Environment.ProcessorCount / 2, 1));
+	private readonly ConcurrentDictionary<EventId, HashSet<Action<ReadOnlySpan<byte>>>> eventHandlers = new();
+	private readonly ConcurrentDictionary<EventId, PendingRequest<bool>> pendingEventSubscriptions = new();
+	private readonly ConcurrentDictionary<EventId, PendingRequest<bool>> pendingEventUnsubscriptions = new();
+	private readonly ObjectPool<WorkItem<(ControllerService, EventId, byte[])>> eventWorkItemPool = new(maxSize: 64);
+	private readonly Lock eventHandlersLock = new();
+
 	private readonly ObjectPool<WorkItem<(ControllerService, uint, byte[], int)>> workItemPool = new(maxSize: 128);
 
 	private readonly WorkQueue frameworkQueue = new();
 	private FrameworkService? framework;
 
 	private uint nextRequestId = 0;
+	private WorkPipeline? eventPipeline;
+	private WorkPipeline? workPipeline;
 
 	private Endpoint? outgoingEndpoint = null;
 	private Endpoint? incomingEndpoint = null;
@@ -368,32 +415,40 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <inheritdoc/>
 	public override async Task Shutdown()
 	{
+		this.workPipeline?.Dispose();
+		this.workPipeline = null;
+		this.eventPipeline?.Dispose();
+		this.eventPipeline = null;
+
 		this.SendShutdownMessage();
 
 		foreach (var kvp in this.pendingHookRequests)
-		{
 			kvp.Value.Dispose();
-		}
 
 		foreach (var kvp in this.pendingRegistrations)
-		{
 			kvp.Value.Dispose();
-		}
 
 		foreach (var kvp in this.pendingUnregistrations)
-		{
 			kvp.Value.Dispose();
-		}
 
 		foreach (var kvp in this.allHooks)
-		{
 			kvp.Value.Handle.Dispose();
-		}
+
+		foreach (var kvp in this.pendingEventSubscriptions)
+			kvp.Value.Dispose();
+
+		foreach (var kvp in this.pendingEventUnsubscriptions)
+			kvp.Value.Dispose();
+
+		// NOTE: No need to unsubscribe from events since the remote controller will
+		// automatically clean up all subscriptions as part of its own shutdown process
 
 		this.pendingHookRequests.Clear();
 		this.pendingRegistrations.Clear();
 		this.pendingUnregistrations.Clear();
 		this.allHooks.Clear();
+		this.pendingEventSubscriptions.Clear();
+		this.pendingEventUnsubscriptions.Clear();
 		this.outgoingEndpoint?.Dispose();
 		this.incomingEndpoint?.Dispose();
 		await base.Shutdown();
@@ -738,6 +793,82 @@ public class ControllerService : ServiceBase<ControllerService>
 		return this.SendDriverCommandInternal(payload);
 	}
 
+	/// <summary>
+	/// Subscribes to an event from the remote controller.
+	/// </summary>
+	/// <remarks>
+	/// It is possible to subscribe multiple handlers to the same
+	/// event, but their relative order of execution on trigger is not guaranteed.
+	/// </remarks>
+	/// <typeparam name="T">The event payload type.</typeparam>
+	/// <param name="eventId">The event to subscribe to.</param>
+	/// <param name="handler">The handler to invoke when the event is received.</param>
+	/// <param name="timeoutMs">Timeout for the subscription acknowledgment.</param>
+	/// <returns>
+	/// An <see cref="EventSubscription"/> handle that can be disposed to unsubscribe,
+	/// or <c>null</c> if the subscription failed.
+	/// </returns>
+	public EventSubscription? SubscribeEvent<T>(EventId eventId, Action<T> handler, int timeoutMs = IPC_TIMEOUT_MS)
+		where T : unmanaged
+	{
+		void WrappedHandler(ReadOnlySpan<byte> payload)
+		{
+			if (payload.Length < Unsafe.SizeOf<T>())
+			{
+				Log.Warning($"Received event {eventId} with unexpected payload size. Expected at least {Unsafe.SizeOf<T>()} bytes, got {payload.Length} bytes. Corrupted payload?");
+				return;
+			}
+
+			var data = MarshalUtils.Deserialize<T>(payload);
+			handler(data);
+		}
+
+		return this.SubscribeEventInternal(eventId, WrappedHandler, timeoutMs);
+	}
+
+	/// <summary>
+	/// Subscribes to an event that carries no payload data.
+	/// </summary>
+	/// <param name="eventId">The event to subscribe to.</param>
+	/// <param name="handler">The handler to invoke when the event is received.</param>
+	/// <param name="timeoutMs">Timeout for the subscription acknowledgment.</param>
+	/// <returns>
+	/// An <see cref="EventSubscription"/> handle that can be disposed to unsubscribe,
+	/// or <c>null</c> if the subscription failed.
+	/// </returns>
+	public EventSubscription? SubscribeEvent(EventId eventId, Action handler, int timeoutMs = IPC_TIMEOUT_MS)
+	{
+#pragma warning disable SA1313
+		void WrappedHandler(ReadOnlySpan<byte> _) => handler();
+#pragma warning restore SA1313
+
+		return this.SubscribeEventInternal(eventId, WrappedHandler, timeoutMs);
+	}
+
+	/// <summary>
+	/// Unsubscribes all handlers from an event.
+	/// </summary>
+	/// <param name="eventId">The event to unsubscribe from.</param>
+	/// <param name="timeoutMs">Timeout for the unsubscription acknowledgment.</param>
+	/// <returns>True if unsubscription was successful.</returns>
+	public bool UnsubscribeAllFromEvent(EventId eventId, int timeoutMs = IPC_TIMEOUT_MS)
+	{
+		int handlerCount;
+		lock (this.eventHandlersLock)
+		{
+			if (!this.eventHandlers.TryRemove(eventId, out var handlers))
+				return true;
+
+			handlerCount = handlers.Count;
+			handlers.Clear();
+		}
+
+		if (!this.isConnected || handlerCount == 0)
+			return true;
+
+		return this.SendEventSubscription(eventId, PayloadType.EventUnsubscribe, timeoutMs, EventSubscriptionFlags.UnsubscribeAll);
+	}
+
 	internal static void ClearActiveBatch()
 	{
 		s_currentBatch = null;
@@ -749,6 +880,25 @@ public class ControllerService : ServiceBase<ControllerService>
 			return;
 
 		this.UnregisterHookById(hookId, IPC_TIMEOUT_MS);
+	}
+
+	internal void UnsubscribeEventInternal(EventId eventId, Action<ReadOnlySpan<byte>> wrappedHandler)
+	{
+		bool removed;
+		lock (this.eventHandlersLock)
+		{
+			if (!this.eventHandlers.TryGetValue(eventId, out var handlers))
+				return;
+
+			removed = handlers.Remove(wrappedHandler);
+			if (handlers.Count == 0)
+				this.eventHandlers.TryRemove(eventId, out _);
+		}
+
+		if (removed && this.isConnected)
+		{
+			this.SendEventSubscription(eventId, PayloadType.EventUnsubscribe, IPC_TIMEOUT_MS);
+		}
 	}
 
 	/// <inheritdoc/>
@@ -771,6 +921,9 @@ public class ControllerService : ServiceBase<ControllerService>
 			throw;
 		}
 
+		this.eventPipeline = new WorkPipeline(1); // Just one worker to keep event order sequential
+		this.workPipeline = new WorkPipeline(Math.Max(Environment.ProcessorCount / 2, 1));
+
 		_ = Task.Factory.StartNew(
 			() => this.ConnectionMonitorLoop(this.CancellationToken),
 			this.CancellationToken,
@@ -791,6 +944,18 @@ public class ControllerService : ServiceBase<ControllerService>
 		try
 		{
 			state.Ctrl.HandleHookRequest(state.MsgId, state.Data.AsSpan(0, state.Length));
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(state.Data);
+		}
+	}
+
+	private static void ProcessEventInternal((ControllerService Ctrl, uint EventId, byte[] Data, int Length) state)
+	{
+		try
+		{
+			state.Ctrl.BroadcastEventToSubscribers((EventId)state.EventId, state.Data.AsSpan(0, state.Length));
 		}
 		finally
 		{
@@ -1027,6 +1192,98 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 	}
 
+	private EventSubscription? SubscribeEventInternal(EventId eventId, Action<ReadOnlySpan<byte>> wrappedHandler, int timeoutMs)
+	{
+		lock (this.eventHandlersLock)
+		{
+			if (!this.eventHandlers.TryGetValue(eventId, out var handlers))
+			{
+				handlers = [];
+				this.eventHandlers[eventId] = handlers;
+			}
+
+			handlers.Add(wrappedHandler);
+		}
+
+		if (this.isConnected)
+		{
+			if (!this.SendEventSubscription(eventId, PayloadType.EventSubscribe, timeoutMs))
+			{
+				lock (this.eventHandlersLock)
+				{
+					if (this.eventHandlers.TryGetValue(eventId, out var handlers))
+						handlers.Remove(wrappedHandler);
+				}
+
+				return null;
+			}
+		}
+
+		return new EventSubscription(this, eventId, wrappedHandler);
+	}
+
+	private bool SendEventSubscription(EventId eventId, PayloadType type, int timeoutMs, EventSubscriptionFlags flags = EventSubscriptionFlags.None)
+	{
+		if (this.outgoingEndpoint == null)
+			return false;
+
+		if (type != PayloadType.EventSubscribe && type != PayloadType.EventUnsubscribe)
+			throw new ArgumentException("Invalid payload type provided for event (un)subscription.", nameof(type));
+
+		var data = new EventSubscriptionData { EventId = eventId, Flags = flags };
+		int payloadSize = Unsafe.SizeOf<EventSubscriptionData>();
+		Span<byte> payload = stackalloc byte[payloadSize];
+		MarshalUtils.Write(payload, in data);
+		uint messageId = (uint)eventId;
+
+		var pendingDict = type == PayloadType.EventSubscribe
+			? this.pendingEventSubscriptions
+			: this.pendingEventUnsubscriptions;
+
+		using var pending = new PendingRequest<bool>();
+		pendingDict[eventId] = pending;
+
+		try
+		{
+			var header = new MessageHeader(messageId, type, (ulong)payloadSize);
+			if (!this.outgoingEndpoint.Write(header, payload, IPC_TIMEOUT_MS))
+				return false;
+
+			if (!pending.Wait(timeoutMs))
+				return false;
+
+			return pending.TryGetResult(out bool success) && success;
+		}
+		finally
+		{
+			pendingDict.TryRemove(eventId, out _);
+		}
+	}
+
+	private void ResendActiveEventSubscriptions()
+	{
+		List<(EventId EventId, int Count)> subscriptions;
+		lock (this.eventHandlersLock)
+		{
+			subscriptions = this.eventHandlers
+				.Where(kvp => kvp.Value.Count > 0)
+				.Select(kvp => (kvp.Key, kvp.Value.Count))
+				.ToList();
+		}
+
+		foreach (var (eventId, count) in subscriptions)
+		{
+			// Send one subscription per handler to restore correct refcount
+			for (int i = 0; i < count; ++i)
+			{
+				if (!this.SendEventSubscription(eventId, PayloadType.EventSubscribe, IPC_REGISTER_TIMEOUT_MS))
+				{
+					Log.Warning($"Failed to re-subscribe to event {eventId} (subscription {i + 1}/{count}) after reconnection.");
+				}
+			}
+		}
+	}
+
 	private Task SendPendingRegistrations()
 	{
 		// Process the entire queue
@@ -1108,6 +1365,7 @@ public class ControllerService : ServiceBase<ControllerService>
 						};
 					}
 
+					this.ResendActiveEventSubscriptions();
 					this.isConnected = true;
 				}
 
@@ -1143,6 +1401,10 @@ public class ControllerService : ServiceBase<ControllerService>
 
 						case PayloadType.NAck:
 							this.HandleNAck(header.Id);
+							break;
+
+						case PayloadType.Event:
+							this.EnqueueEvent(header.Id, payload);
 							break;
 
 						case PayloadType.Request when payload.Length > 0:
@@ -1217,6 +1479,22 @@ public class ControllerService : ServiceBase<ControllerService>
 			return;
 		}
 
+		EventId eventId = (EventId)msgId;
+		if (Enum.IsDefined(eventId))
+		{
+			if (this.pendingEventSubscriptions.TryGetValue(eventId, out var subPending))
+			{
+				subPending.SetResult(true);
+				return;
+			}
+
+			if (this.pendingEventUnsubscriptions.TryGetValue(eventId, out var unsubPending))
+			{
+				unsubPending.SetResult(true);
+				return;
+			}
+		}
+
 		if (msgId == HookMessageId.GOODBYE_MESSAGE_ID)
 		{
 			this.pendingByeMessage.SetResult(true);
@@ -1236,6 +1514,22 @@ public class ControllerService : ServiceBase<ControllerService>
 		{
 			unregPending.SetResult(false);
 			return;
+		}
+
+		EventId eventId = (EventId)msgId;
+		if (Enum.IsDefined(eventId))
+		{
+			if (this.pendingEventSubscriptions.TryGetValue(eventId, out var subPending))
+			{
+				subPending.SetResult(false);
+				return;
+			}
+
+			if (this.pendingEventUnsubscriptions.TryGetValue(eventId, out var unsubPending))
+			{
+				unsubPending.SetResult(false);
+				return;
+			}
 		}
 
 		if (msgId == HookMessageId.GOODBYE_MESSAGE_ID)
@@ -1269,7 +1563,53 @@ public class ControllerService : ServiceBase<ControllerService>
 			workItem.Initialize(this.workItemPool, &ProcessHookRequestInternal, (this, msgId, payloadCopy, length));
 		}
 
-		this.workPipeline.Enqueue(workItem);
+		this.workPipeline?.Enqueue(workItem);
+	}
+
+	private void EnqueueEvent(uint eventIdRaw, ReadOnlySpan<byte> payload)
+	{
+		EventId eventId = (EventId)eventIdRaw;
+		lock (this.eventHandlersLock)
+		{
+			if (!this.eventHandlers.TryGetValue(eventId, out var handlers) || handlers.Count == 0)
+				return; // Subscribers may have unsubscribed before the event signal; Abort
+		}
+
+		byte[] payloadCopy = ArrayPool<byte>.Shared.Rent(payload.Length);
+		int length = payload.Length;
+		payload.CopyTo(payloadCopy);
+
+		var workItem = this.workItemPool.Get();
+		unsafe
+		{
+			workItem.Initialize(this.workItemPool, &ProcessEventInternal, (this, eventIdRaw, payloadCopy, length));
+		}
+
+		this.eventPipeline?.Enqueue(workItem);
+	}
+
+	private void BroadcastEventToSubscribers(EventId eventId, ReadOnlySpan<byte> payload)
+	{
+		Action<ReadOnlySpan<byte>>[] handlersSnapshot;
+		lock (this.eventHandlersLock)
+		{
+			if (!this.eventHandlers.TryGetValue(eventId, out var handlers) || handlers.Count == 0)
+				return; // Subscribers may have unsubscribed since enqueue; Abort
+
+			handlersSnapshot = [.. handlers];
+		}
+
+		foreach (var handler in handlersSnapshot)
+		{
+			try
+			{
+				handler(payload);
+			}
+			catch (Exception ex)
+			{
+				Log.Error(ex, $"Error in event handler for {eventId}");
+			}
+		}
 	}
 
 	private void HandleHookRequest(uint msgId, ReadOnlySpan<byte> payload)

@@ -60,7 +60,7 @@ public class PoseService : ServiceBase<PoseService>
 	public bool CanEdit { get; set; }
 
 	/// <inheritdoc/>
-	protected override IEnumerable<IService> Dependencies => [AddressService.Instance, GposeService.Instance];
+	protected override IEnumerable<IService> Dependencies => [AddressService.Instance, ControllerService.Instance, GposeService.Instance];
 
 	public override async Task Shutdown()
 	{
