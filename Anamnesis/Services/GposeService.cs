@@ -7,6 +7,7 @@ using Anamnesis.Core;
 using PropertyChanged;
 using RemoteController.IPC;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -15,7 +16,10 @@ using System.Threading.Tasks;
 [AddINotifyPropertyChangedInterface]
 public class GposeService : ServiceBase<GposeService>
 {
+	private const int INITIAL_STATE_RETRY_MS = 1000;
+
 	private EventSubscription? gposeEventSubsription;
+	private bool hasInitialState = false;
 
 	/// <summary>
 	/// The delegate object for the <see cref="GposeService.GposeStateChanged"/> event.
@@ -67,6 +71,7 @@ public class GposeService : ServiceBase<GposeService>
 	{
 		this.gposeEventSubsription?.Dispose();
 		this.gposeEventSubsription = null;
+		this.hasInitialState = false;
 		return base.Shutdown();
 	}
 
@@ -77,11 +82,45 @@ public class GposeService : ServiceBase<GposeService>
 			EventId.GposeStateChanged,
 			this.OnGposeStateChanged);
 
+		this.CancellationTokenSource = new CancellationTokenSource();
+		this.BackgroundTask = Task.Run(() => this.QueryInitialState(this.CancellationToken));
 		await base.OnStart();
+	}
+
+	private async Task QueryInitialState(CancellationToken cancellationToken)
+	{
+		while (!this.hasInitialState && !cancellationToken.IsCancellationRequested)
+		{
+			bool? initialState = IsInGpose();
+			if (initialState.HasValue)
+			{
+				Log.Debug($"Initial GPose state: {(initialState.Value ? "In GPose" : "Not in GPose")}");
+				if (initialState.Value != this.IsGpose)
+				{
+					this.IsGpose = initialState.Value;
+					GposeStateChanged?.Invoke(initialState.Value);
+				}
+
+				this.hasInitialState = true;
+				return;
+			}
+
+			try
+			{
+				await Task.Delay(INITIAL_STATE_RETRY_MS, cancellationToken);
+			}
+			catch (TaskCanceledException)
+			{
+				break;
+			}
+		}
 	}
 
 	private void OnGposeStateChanged(GposeStateChangedPayload payload)
 	{
+		// Mark as received in case the event is received before the initial state query succeeds.
+		this.hasInitialState = true;
+
 		if (payload.IsInGpose != this.IsGpose)
 		{
 			this.IsGpose = payload.IsInGpose;

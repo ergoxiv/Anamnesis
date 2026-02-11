@@ -47,6 +47,9 @@ public sealed class GposeDriver : DriverBase<GposeDriver>
 		this.frameworkDriver.GameTick += this.Update;
 		this.StateChanged += this.OnGposeStateChanged;
 		this.RegisterInstance();
+
+		// Get initial reading
+		this.isInGpose = this.isInGposeWrapper();
 	}
 
 	/// <summary>
