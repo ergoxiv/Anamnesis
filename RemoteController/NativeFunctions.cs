@@ -25,6 +25,17 @@ internal static partial class NativeFunctions
 	}
 
 	/// <summary>
+	/// An enum that represents the possible return values of the WaitForSingleObject function.
+	/// </summary>
+	public enum WaitResult : uint
+	{
+		WAIT_OBJECT_0 = 0x00000000,
+		WAIT_ABANDONED = 0x00000080,
+		WAIT_TIMEOUT = 0x00000102,
+		WAIT_FAILED = 0xFFFFFFFF,
+	}
+
+	/// <summary>
 	/// Retrieves a module handle for the specified module and increments the module's reference count unless
 	/// GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT is specified. The module must have been loaded by the
 	/// calling process.
@@ -122,4 +133,48 @@ internal static partial class NativeFunctions
 	/// </returns>
 	[LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "GetModuleFileNameW")]
 	public static unsafe partial uint GetModuleFileName(IntPtr hModule, char* lpFilename, uint nSize);
+
+
+	/// <summary>
+	/// Waits until the specified object is in the signaled state or the time-out interval elapses.
+	///
+	/// To enter an alertable wait state, use the WaitForSingleObjectEx function.
+	/// To wait for multiple objects, use WaitForMultipleObjects.
+	/// </summary>
+	/// <param name="hHandle">
+	/// A handle to the object.
+	///
+	/// If this handle is closed while the wait is still pending, the function's behavior is undefined.
+	///
+	/// The handle must have the SYNCHRONIZE access right.
+	/// </param>
+	/// <param name="dwMilliseconds"></param>
+	/// The time-out interval, in milliseconds. If a nonzero value is specified, the function waits until
+	/// the object is signaled or the interval elapses. If dwMilliseconds is zero, the function does not
+	/// enter a wait state if the object is not signaled; it always returns immediately.
+	/// If dwMilliseconds is INFINITE, the function will return only when the object is signaled.
+	/// <returns>
+	/// If the function succeeds, the return value indicates the event that caused the function to return.
+	/// See <see cref="WaitResult"/> for possible return values.
+	/// </returns>
+	[LibraryImport("kernel32.dll", SetLastError = false)]
+	public static partial uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+	/// <summary>
+	/// Closes an open object handle.
+	/// </summary>
+	/// <param name="hObject">A valid handle to an open object.</param>
+	/// <returns>
+	/// If the function succeeds, the return value is nonzero.
+	///
+	/// If the function fails, the return value is zero.To get extended error information, call GetLastError.
+	///
+	/// If the application is running under a debugger, the function will throw an exception if it receives
+	/// either a handle value that is not valid or a pseudo-handle value. This can happen if you close a
+	/// handle twice, or if you call CloseHandle on a handle returned by the FindFirstFile function instead
+	/// of calling the FindClose function.
+	/// </returns>
+	[LibraryImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	public static partial bool CloseHandle(IntPtr hObject);
 }

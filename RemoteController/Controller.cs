@@ -22,8 +22,9 @@ public class Controller
 {
 	private const string BUF_SHMEM_OUTGOING = "Local\\ANAM_SHMEM_CTRL_TO_MAIN";
 	private const string BUF_SHMEM_INCOMING = "Local\\ANAM_SHMEM_MAIN_TO_CTRL";
-	private const uint WATCHDOG_TIMEOUT_MS = 60000;
-	private const uint WATCHDOG_TIMER_INTERVAL_MS = 15000;
+	
+	private const uint PROCESS_MONITOR_POLL_MS = 1000;
+	private const int PROCESS_MONITOR_JOIN_TIMEOUT_MS = 2000;
 	private const int IPC_TIMEOUT_MS = 100;
 	private const int IPC_FAST_FAIL_TIMEOUT_MS = 16;
 	private const int BATCH_INVOKE_BUFFER_STARTSIZE = 1024;
@@ -87,13 +88,13 @@ public class Controller
 	private static DriverManager? s_driverManager = null;
 	private static Endpoint? s_outgoingEndpoint = null;
 	private static Endpoint? s_incomingEndpoint = null;
-	private static long s_heartbeatTimestamp = 0;
-	private static Timer? s_watchdogTimer;
 	private static volatile bool s_running = true;
 	private static bool s_dllImportResolverSet = false;
+	private static IntPtr s_mainProcessHandle = IntPtr.Zero;
+	private static Thread? s_processMonitorThread = null;
 
 	[RequiresDynamicCode("Requires dynamic code")]
-	private static unsafe void* NativePtr() => (delegate* unmanaged<void>)&RemoteControllerEntry;
+	private static unsafe void* NativePtr() => (delegate* unmanaged<IntPtr, void>)&RemoteControllerEntry;
 
 	/// <summary>
 	/// Sends an intercept request to the host application and waits for a response.
@@ -281,9 +282,10 @@ public class Controller
 	[UnmanagedCallersOnly(EntryPoint = "RemoteControllerEntry")]
 	[RequiresUnreferencedCode("This code snippet is not trimming-safe.")]
 	[RequiresDynamicCode("HookRegistry requires dynamic code")]
-	public static void RemoteControllerEntry()
+	public static void RemoteControllerEntry(IntPtr mainProcessHandle)
 	{
-		Cleanup(); // Ensure that no previous state lingers
+		Cleanup();
+		s_mainProcessHandle = mainProcessHandle;
 		var workerThread = new Thread(Main)
 		{
 			IsBackground = true,
@@ -348,8 +350,13 @@ public class Controller
 
 			Log.Debug("Successfully created IPC endpoints.");
 			s_running = true;
-			s_heartbeatTimestamp = Environment.TickCount64;
-			s_watchdogTimer = new Timer(CheckWatchdog, null, WATCHDOG_TIMER_INTERVAL_MS, WATCHDOG_TIMER_INTERVAL_MS);
+
+			s_processMonitorThread = new Thread(MonitorMainAppProcess)
+			{
+				IsBackground = true,
+				Name = "RemoteController.ProcessMonitor",
+			};
+			s_processMonitorThread.Start();
 
 			s_driverManager = new DriverManager();
 			s_driverManager.Initialize();
@@ -450,34 +457,74 @@ public class Controller
 		return latestFasmDll.FullName;
 	}
 
+	private static void MonitorMainAppProcess()
+	{
+		Log.Information("Process monitor started.");
+
+		while (s_running)
+		{
+			long waitResult = NativeFunctions.WaitForSingleObject(
+				s_mainProcessHandle,
+				PROCESS_MONITOR_POLL_MS);
+
+			switch ((NativeFunctions.WaitResult)waitResult)
+			{
+				case NativeFunctions.WaitResult.WAIT_OBJECT_0:
+					Log.Information("Main application process terminated. Initiating shutdown...");
+					s_running = false;
+					return;
+
+				case NativeFunctions.WaitResult.WAIT_TIMEOUT:
+					continue; // Process still running, continue monitoring
+
+				default:
+					Log.Warning($"WaitForSingleObject returned unexpected result: 0x{waitResult:X}. Initiating shutdown.");
+					s_running = false;
+					return;
+			}
+		}
+
+		Log.Debug("Process monitor exiting (shutdown requested).");
+	}
+
 	[RequiresDynamicCode("HookRegistry requires dynamic code")]
 	private static void Cleanup()
 	{
 		Log.Information("Running shutdown sequence...");
+
+		s_running = false;
+
+		if (s_processMonitorThread != null && s_processMonitorThread.IsAlive)
+		{
+			if (!s_processMonitorThread.Join(PROCESS_MONITOR_JOIN_TIMEOUT_MS))
+				Log.Warning("Process monitor thread did not exit in time.");
+
+			s_processMonitorThread = null;
+		}
+
+		if (s_mainProcessHandle != IntPtr.Zero)
+		{
+			NativeFunctions.CloseHandle(s_mainProcessHandle);
+			s_mainProcessHandle = IntPtr.Zero;
+		}
+
 		HookRegistry.Instance.UnregisterAll();
 		s_driverManager?.Dispose();
 		s_driverManager = null;
-		s_watchdogTimer?.Dispose();
+
 		s_outgoingEndpoint?.Dispose();
 		s_outgoingEndpoint = null;
 		s_incomingEndpoint?.Dispose();
 		s_incomingEndpoint = null;
+
+		s_pendingHooks.Clear();
+		s_sequenceCounters.Clear();
 		s_eventSubscriptionRefCount.Clear();
 
 		Log.Information("Shutdown complete. Remember us...Remember...that we once lived.");
 		Logger.Deinitialize(); // Keep the logger as the last step
 		GC.Collect(2, GCCollectionMode.Forced, true);
 		GC.WaitForPendingFinalizers();
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static void CheckWatchdog(object? state)
-	{
-		if (Environment.TickCount64 - s_heartbeatTimestamp > WATCHDOG_TIMEOUT_MS)
-		{
-			Log.Warning("No heartbeat received for 60 seconds. Controller shutdown is requested.");
-			s_running = false;
-		}
 	}
 
 	[RequiresDynamicCode("HookRegistry requires dynamic code")]
@@ -509,15 +556,6 @@ public class Controller
 
 					case PayloadType.Blob:
 						HandleHookResponse(header.Id, payload);
-						break;
-
-					case PayloadType.Bye:
-						HandleGoodbyeMessage(header.Id);
-						break;
-
-					case PayloadType.Heartbeat:
-						s_heartbeatTimestamp = Environment.TickCount64;
-						Log.Verbose("Received heartbeat message.");
 						break;
 
 					case PayloadType.Register:
@@ -876,19 +914,6 @@ public class Controller
 		{
 			Log.Error(ex, "Error handling event unsubscribe message.");
 			SendResponse(messageId, PayloadType.NAck);
-		}
-	}
-
-	private static void HandleGoodbyeMessage(uint msgId)
-	{
-		try
-		{
-			Log.Information("Received goodbye message from host. Shutting down controller...");
-			SendResponse(msgId, PayloadType.Ack);
-		}
-		finally
-		{
-			s_running = false;
 		}
 	}
 

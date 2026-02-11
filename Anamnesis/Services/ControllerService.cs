@@ -343,7 +343,7 @@ public sealed class EventSubscription : IDisposable
 /// <summary>
 /// A service that communicates with the remote controller that we inject into the game process.
 /// The service is responsible for sending and receiving messages to and from the controller, including
-/// watchdog heartbeats, and function hook communication.
+/// function hook communication, driver commands, and events, driver commands.
 /// </summary>
 public class ControllerService : ServiceBase<ControllerService>
 {
@@ -355,7 +355,6 @@ public class ControllerService : ServiceBase<ControllerService>
 	private const ulong BUF_BLK_SIZE = 8192;
 
 	private const int IPC_REGISTER_TIMEOUT_MS = 1000;
-	private const int HEARTBEAT_INTERVAL_MS = 15_000;
 	private const int STACKALLOC_THRESHOLD = 256;
 	private const int CONN_CHECK_DELAY_MS = 1000;
 
@@ -373,7 +372,6 @@ public class ControllerService : ServiceBase<ControllerService>
 	private readonly ConcurrentDictionary<uint, ushort> sequenceCounters = new();
 	private readonly ConcurrentDictionary<string, uint> delegateKeyToHookId = new();
 	private readonly ObjectPool<PendingRequest<byte[]>> wrapperRequestPool = new(maxSize: 128);
-	private readonly PendingRequest<bool> pendingByeMessage = new();
 
 	private readonly ConcurrentDictionary<uint, PendingRequest<byte[]>> pendingDriverCommands = new();
 
@@ -394,7 +392,6 @@ public class ControllerService : ServiceBase<ControllerService>
 
 	private Endpoint? outgoingEndpoint = null;
 	private Endpoint? incomingEndpoint = null;
-	private Timer? heartbeatTimer;
 	private bool isConnected = false;
 
 	/// <summary>
@@ -417,12 +414,12 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <inheritdoc/>
 	public override async Task Shutdown()
 	{
+		this.isConnected = false;
+
 		this.workPipeline?.Dispose();
 		this.workPipeline = null;
 		this.eventPipeline?.Dispose();
 		this.eventPipeline = null;
-
-		this.SendShutdownMessage();
 
 		foreach (var kvp in this.pendingHookRequests)
 			kvp.Value.Dispose();
@@ -1328,11 +1325,7 @@ public class ControllerService : ServiceBase<ControllerService>
 				{
 					if (this.isConnected)
 					{
-						// NOTE: The heartbeat timer is stopped not to flood the ring buffer
-						// while the remote controller is not available.
 						Log.Warning("Connection lost with remote controller.");
-						this.heartbeatTimer?.Dispose();
-						this.heartbeatTimer = null;
 
 						// Deactivate system hooks
 						if (this.framework != null)
@@ -1353,7 +1346,6 @@ public class ControllerService : ServiceBase<ControllerService>
 					Log.Information("Connection established with remote controller.");
 					this.RequeueAllInvalidatedHooks();
 					await this.SendPendingRegistrations();
-					this.heartbeatTimer ??= new Timer(this.SendHeartbeat, null, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS);
 
 					// Register system hooks
 					if (this.framework != null)
@@ -1443,22 +1435,6 @@ public class ControllerService : ServiceBase<ControllerService>
 		}
 	}
 
-	private void SendHeartbeat(object? state)
-	{
-		try
-		{
-			if (this.outgoingEndpoint != null && this.IsInitialized)
-			{
-				var heartbeatHeader = new MessageHeader(type: PayloadType.Heartbeat);
-				this.outgoingEndpoint.Write(heartbeatHeader, IPC_TIMEOUT_MS);
-			}
-		}
-		catch (Exception ex)
-		{
-			Log.Verbose(ex, "Failed to send heartbeat to remote controller.");
-		}
-	}
-
 	private void HandleAck(uint msgId, ReadOnlySpan<byte> payload)
 	{
 		if (this.pendingRegistrations.TryGetValue(msgId, out var regPending))
@@ -1498,12 +1474,6 @@ public class ControllerService : ServiceBase<ControllerService>
 				return;
 			}
 		}
-
-		if (msgId == HookMessageId.GOODBYE_MESSAGE_ID)
-		{
-			this.pendingByeMessage.SetResult(true);
-			return;
-		}
 	}
 
 	private void HandleNAck(uint msgId)
@@ -1534,12 +1504,6 @@ public class ControllerService : ServiceBase<ControllerService>
 				unsubPending.SetResult(false);
 				return;
 			}
-		}
-
-		if (msgId == HookMessageId.GOODBYE_MESSAGE_ID)
-		{
-			this.pendingByeMessage.SetResult(false);
-			return;
 		}
 	}
 
@@ -1713,30 +1677,6 @@ public class ControllerService : ServiceBase<ControllerService>
 	private ushort GetNextSequence(uint hookIndex)
 	{
 		return (ushort)this.sequenceCounters.AddOrUpdate(hookIndex, 1, (_, v) => (ushort)((v + 1) & HookMessageId.MAX_SEQ_NUM));
-	}
-
-	private void SendShutdownMessage()
-	{
-		if (this.outgoingEndpoint == null)
-			return;
-
-		this.pendingByeMessage.Reset();
-		var header = new MessageHeader(HookMessageId.GOODBYE_MESSAGE_ID, type: PayloadType.Bye);
-		this.outgoingEndpoint.Write(header, IPC_TIMEOUT_MS);
-
-		if (this.pendingByeMessage.Wait(IPC_TIMEOUT_MS))
-			Log.Information("Remote controller acknowledged shutdown message.");
-		else
-			Log.Warning("No acknowledgment received for shutdown message.");
-
-		// Regardless of the result, mark as disconnected
-		// This will avoid hooks from attempting to use the IPC during disposal
-		this.isConnected = false;
-
-		if (this.pendingByeMessage.TryGetResult(out bool success) && success)
-			Log.Information("Remote controller shutdown completed successfully.");
-		else
-			Log.Warning("Remote controller shutdown reported failure.");
 	}
 
 	private record HookRegistrationInfo(

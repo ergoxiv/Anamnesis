@@ -673,6 +673,41 @@ internal static partial class NativeFunctions
 	}
 
 	/// <summary>
+	/// An enum that declares values that specify access rights for processes.
+	/// </summary>
+	[Flags]
+	public enum ProcessAccessFlags : long
+	{
+		/// <summary>
+		/// Required to delete the object.
+		/// </summary>
+		DELETE = 0x00010000L,
+
+		/// <summary>
+		/// Required to read information in the security descriptor for the object, not
+		/// including the information in the SACL. To read or write the SACL, you must
+		/// request the ACCESS_SYSTEM_SECURITY access right.
+		/// </summary>
+		READ_CONTROL = 0x00020000L,
+
+		/// <summary>
+		/// The right to use the object for synchronization. This enables a thread to
+		/// wait until the object is in the signaled state.
+		/// </summary>
+		SYNCHRONIZE = 0x00100000L,
+
+		/// <summary>
+		/// Required to modify the DACL in the security descriptor for the object.
+		/// </summary>
+		WRITE_DAC = 0x00040000L,
+
+		/// <summary>
+		/// Required to change the owner in the security descriptor for the object.
+		/// </summary>
+		WRITE_OWNER = 0x00080000L,
+	}
+
+	/// <summary>
 	/// Status codes returned by Windows NT API functions.
 	/// </summary>
 	/// <remarks>
@@ -1271,6 +1306,74 @@ internal static partial class NativeFunctions
 	public static partial IntPtr GetCurrentProcess();
 
 	/// <summary>
+	/// Duplicates an object handle.
+	/// </summary>
+	/// <param name="hSourceProcessHandle">
+	/// A handle to the process with the handle to be duplicated.
+	///
+	/// The handle must have the PROCESS_DUP_HANDLE access right.
+	/// </param>
+	/// <param name="hSourceHandle">
+	/// The handle to be duplicated. This is an open object handle that is valid in the context of the
+	/// source process. For a list of objects whose handles can be duplicated, see the following Remarks section.
+	///
+	/// If hSourceHandle is a pseudo handle returned by GetCurrentProcess or GetCurrentThread, hSourceProcessHandle
+	/// should be a handle to the process calling DuplicateHandle.
+	/// </param>
+	/// <param name="hTargetProcessHandle">
+	/// A handle to the process that is to receive the duplicated handle. The handle must have the
+	/// PROCESS_DUP_HANDLE access right.
+	///
+	/// This parameter is optional and can be specified as NULL if the DUPLICATE_CLOSE_SOURCE flag is
+	/// set in Options.
+	/// </param>
+	/// <param name="lpTargetHandle">
+	/// A pointer to a variable that receives the duplicate handle. This handle value is valid in the context
+	/// of the target process.
+	///
+	/// If hSourceHandle is a pseudo handle returned by GetCurrentProcess or GetCurrentThread, DuplicateHandle
+	/// converts it to a real handle to a process or thread, respectively.
+	///
+	/// If lpTargetHandle is NULL, the function duplicates the handle, but does not return the duplicate handle
+	/// value to the caller.This behavior exists only for backward compatibility with previous versions of this
+	/// function. You should not use this feature, as you will lose system resources until the target process terminates.
+	///
+	/// This parameter is ignored if hTargetProcessHandle is NULL.
+	/// </param>
+	/// <param name="dwDesiredAccess">
+	/// The access requested for the new handle.
+	///
+	/// This parameter is ignored if the dwOptions parameter specifies the DUPLICATE_SAME_ACCESS flag.
+	/// Otherwise, the flags that can be specified depend on the type of object whose handle is to be duplicated.
+	///
+	/// This parameter is ignored if hTargetProcessHandle is NULL.
+	/// </param>
+	/// <param name="bInheritHandle">
+	/// A variable that indicates whether the handle is inheritable. If TRUE, the duplicate handle can be inherited
+	/// by new processes created by the target process. If FALSE, the new handle cannot be inherited.
+	///
+	/// This parameter is ignored if hTargetProcessHandle is NULL.
+	/// </param>
+	/// <param name="dwOptions">
+	/// Optional actions. This parameter can be zero, or any combination of the following values.
+	/// </param>
+	/// <returns>
+	/// If the function succeeds, the return value is nonzero.
+	///
+	/// If the function fails, the return value is zero.To get extended error information, call GetLastError.
+	/// </returns>
+	[LibraryImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	public static partial bool DuplicateHandle(
+		IntPtr hSourceProcessHandle,
+		IntPtr hSourceHandle,
+		IntPtr hTargetProcessHandle,
+		out IntPtr lpTargetHandle,
+		uint dwDesiredAccess,
+		[MarshalAs(UnmanagedType.Bool)] bool bInheritHandle,
+		uint dwOptions);
+
+	/// <summary>
 	/// The ImpersonateSelf function obtains an access token that impersonates the security context of the
 	/// calling process. The token is assigned to the calling thread.
 	/// </summary>
@@ -1524,7 +1627,7 @@ internal static partial class NativeFunctions
 	[LibraryImport("advapi32.dll", SetLastError = true, EntryPoint = "SetEntriesInAclW")]
 	public static partial uint SetEntriesInAcl(
 		uint cCountOfExplicitEntries,
-		[MarshalAs(UnmanagedType.LPArray)] ExplicitAccess[] pListOfExplicitEntries,
+		[MarshalAs(UnmanagedType.LPArray), In] ExplicitAccess[] pListOfExplicitEntries,
 		IntPtr OldAcl,
 		out IntPtr NewAcl);
 
