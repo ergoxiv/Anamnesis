@@ -16,7 +16,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using XivToolsWpf;
-using static RemoteController.Interop.Delegates.GameMain;
 
 /// <summary>
 /// A service that manages the selection and pinning of actors in the application.
@@ -287,6 +286,7 @@ public class TargetService : ServiceBase<TargetService>
 	public override Task Shutdown()
 	{
 		GposeService.GposeStateChanged -= this.GposeService_GposeStateChanged;
+		GposeService.InitialStateResolved -= this.OnGposeInitialStateResolved;
 		PoseService.EnabledChanged -= this.PoseService_EnabledChanged;
 		PoseService.FreezeWorldStateEnabledChanged -= this.PoseService_EnabledChanged;
 		return base.Shutdown();
@@ -435,50 +435,62 @@ public class TargetService : ServiceBase<TargetService>
 
 		if (GameService.GetIsSignedIn())
 		{
-			try
+			if (GposeService.Instance.HasInitialState)
 			{
-				var actorHandles = ActorService.Instance.ObjectTable.GetAll();
-				bool? isGpose = GposeService.IsInGpose();
-
-				// We want the first non-hidden actor with a name in the same mode as the game
-				foreach (var handle in actorHandles)
-				{
-					var result = handle.Do(a =>
-					{
-						if (a.IsDisposed)
-							return false;
-
-						// Ensure the actor data is up to date
-						a.Synchronize(exclGroups: ExcludeSkeletonGroup);
-
-						if (a.IsHidden)
-							return false;
-
-						if (string.IsNullOrEmpty(a.Name))
-							return false;
-
-						if (!isGpose.HasValue || a.IsGPoseActor != isGpose.Value)
-							return false;
-
-						return true;
-					});
-
-					if (result == true)
-					{
-						await PinActor(handle);
-						break;
-					}
-				}
+				await PinDefaultActor();
 			}
-			catch (Exception ex)
+			else
 			{
-				Log.Error(ex, "Failed to pin default actor");
+				GposeService.InitialStateResolved += this.OnGposeInitialStateResolved;
 			}
 		}
 
 		this.CancellationTokenSource = new CancellationTokenSource();
 		this.BackgroundTask = Task.Run(() => this.TickPinnedActors(this.CancellationToken));
 		await base.OnStart();
+	}
+
+	private static async Task PinDefaultActor()
+	{
+		try
+		{
+			var actorHandles = ActorService.Instance.ObjectTable.GetAll();
+			bool? isGpose = GposeService.IsInGpose();
+
+			// We want the first non-hidden actor with a name in the same mode as the game
+			foreach (var handle in actorHandles)
+			{
+				var result = handle.Do(a =>
+				{
+					if (a.IsDisposed)
+						return false;
+
+					// Ensure the actor data is up to date
+					a.Synchronize(exclGroups: ExcludeSkeletonGroup);
+
+					if (a.IsHidden)
+						return false;
+
+					if (string.IsNullOrEmpty(a.Name))
+						return false;
+
+					if (!isGpose.HasValue || a.IsGPoseActor != isGpose.Value)
+						return false;
+
+					return true;
+				});
+
+				if (result == true)
+				{
+					await PinActor(handle);
+					break;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Error(ex, "Failed to pin default actor");
+		}
 	}
 
 	private static void SetPlayerTarget(IntPtr? ptr)
@@ -604,6 +616,16 @@ public class TargetService : ServiceBase<TargetService>
 		{
 			pin.Memory?.Do(a => a.RaiseRefreshChanged());
 		}
+	}
+
+	private async void OnGposeInitialStateResolved()
+	{
+		GposeService.InitialStateResolved -= this.OnGposeInitialStateResolved;
+
+		if (!GameService.GetIsSignedIn())
+			return;
+
+		await PinDefaultActor();
 	}
 
 	private void GposeService_GposeStateChanged(bool newState) => this.RefreshActorRefreshStatus();
