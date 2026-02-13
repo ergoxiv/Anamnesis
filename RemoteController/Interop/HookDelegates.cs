@@ -70,7 +70,7 @@ public static class HkaPartialSkeleton
 {
 	[FunctionBind("48 8B C4 48 89 58 18 55 56 57 41 54 41 55 41 56 41 57 48 81 EC ?? ?? ?? ?? 0F 29 70 B8 0F 29 78 A8 44 0F 29 40 ?? 44 0F 29 48 ?? 48 8B 05 ?? ?? ?? ??")]
 	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-	public unsafe delegate ulong UpdateBoneTransform(nint partialPtr, ulong boneId, HkaTransform4* transform, byte bUpdateSecondaryPose, byte bPropagate);
+	public unsafe delegate nint SetBoneModelTransform(nint partialPtr, ulong boneId, HkaTransform4* transform, byte bUpdateSecondaryPose, byte bPropagate);
 }
 
 public static class HkaLookAtIkSolver
@@ -93,7 +93,7 @@ public static class HkaPose
 
 public static class BoneKineDriver
 {
-	[FunctionBind("48 8B C4 55 57 48 83 EC 58 ")]
+	[FunctionBind("48 8B C4 55 57 48 83 EC 58")]
 	[UnmanagedFunctionPointer(CallingConvention.StdCall)]
 	public delegate void ApplyKineDriverTransforms(IntPtr kineDriverPtr, IntPtr hkaPosePtr);
 }

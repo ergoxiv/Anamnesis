@@ -22,7 +22,7 @@ using HkaPoseStruct = Interop.Types.HkaPose;
 public sealed class PosingDriver : DriverBase<PosingDriver>
 {
 	// NOTES:
-	// - "UpdateBoneTransform" is used to freeze physics simulations by preventing the game from updating bone transforms.
+	// - "SetBoneModelTransform" is used to freeze physics simulations by preventing the game from updating bone transforms.
 	// - The kinematic driver is hooked to allow for the posing of secondary physics bones that are driven by kine drivers (e.g. visor, clothing top bones, etc.).
 	// - "LookAtIkSolver.Solve" is hooked to prevent the game from updating head and eye look-at targets, allowing for manual posing of the head and eyes.
 	// - "CalculateBoneModelSpace" and "SyncModelSpace" are hooked to prevent the game from overwriting manual pose adjustments when it calculates bone transforms.
@@ -31,7 +31,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 
 	private readonly GposeDriver gposeDriver;
 	private readonly IHook<GameObject.SetPosition> hookSetPosition;
-	private readonly IHook<HkaPartialSkeleton.UpdateBoneTransform> hookPhysics;
+	private readonly IHook<HkaPartialSkeleton.SetBoneModelTransform> hookPhysics;
 	private readonly IHook<HkaLookAtIkSolver.Solve> hookLookAt;
 	private readonly IHook<HkaPoseDelegate.CalculateBoneModelSpace> hookCalculateBone;
 	private readonly IHook<HkaPoseDelegate.SyncModelSpace> hookSyncModel;
@@ -41,7 +41,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 	private readonly IHook<GameObject.UpdateVisualScale> hookUpdateVisualScale;
 
 	private readonly GameObject.SetPosition setPositionDetour;
-	private readonly HkaPartialSkeleton.UpdateBoneTransform physicsDetour;
+	private readonly HkaPartialSkeleton.SetBoneModelTransform physicsDetour;
 	private readonly HkaLookAtIkSolver.Solve lookAtDetour;
 	private readonly HkaPoseDelegate.CalculateBoneModelSpace calculateBoneDetour;
 	private readonly HkaPoseDelegate.SyncModelSpace syncModelDetour;
@@ -71,7 +71,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 		unsafe
 		{
 			// NOTE: Keep references to the detour methods to prevent them from being garbage collected
-			this.physicsDetour = this.DetourUpdateBoneTransform;
+			this.physicsDetour = this.DetourSetBoneModelTransform;
 			this.lookAtDetour = this.DetourLookAtSolve;
 			this.calculateBoneDetour = this.DetourCalculateBoneModelSpace;
 			this.syncModelDetour = this.DetourSyncModelSpace;
@@ -145,10 +145,10 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 		this.hookUpdateVisualScale.Disable();
 	}
 
-	private unsafe ulong DetourUpdateBoneTransform(nint partialPtr, ulong boneId, HkaTransform4* transform, byte bUpdateSecondaryPose, byte bPropagate)
+	private unsafe nint DetourSetBoneModelTransform(nint partialPtr, ulong boneId, HkaTransform4* transform, byte bUpdateSecondaryPose, byte bPropagate)
 	{
 		if (this.arePhysicsFrozen)
-			return boneId;
+			return partialPtr;
 
 		return this.hookPhysics.OriginalFunction(partialPtr, boneId, transform, bUpdateSecondaryPose, bPropagate);
 	}
@@ -166,7 +166,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 
 	private unsafe HkaTransform4* DetourCalculateBoneModelSpace(nint posePtr, int boneIdx)
 	{
-		if (this.isPosingEnabled)
+		if (this.isPosingEnabled && this.arePhysicsFrozen)
 		{
 			HkaPoseStruct* pose = (HkaPoseStruct*)posePtr;
 			
@@ -182,7 +182,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 				return this.hookCalculateBone.OriginalFunction(posePtr, boneIdx);
 
 			// Clear the dirty flag to indicate the bone is calculated
-			pose->ClearModelDirty(boneIdx);
+			pose->ClearModelDirtyChain(boneIdx);
 			return transform;
 		}
 
@@ -191,7 +191,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 
 	private void DetourSyncModelSpace(nint posePtr)
 	{
-		if (this.isPosingEnabled)
+		if (this.isPosingEnabled && this.arePhysicsFrozen)
 			return;
 
 		this.hookSyncModel.OriginalFunction(posePtr);
@@ -205,7 +205,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 		this.hookKineDriver.OriginalFunction(kineDriverPtr, hkaPosePtr);
 	}
 
-	private unsafe nint DetourSetPosition(nint goPtr, float x, float y, float z)
+	private nint DetourSetPosition(nint goPtr, float x, float y, float z)
 	{
 		if (this.isWorldVisualStateFrozen)
 			return goPtr;
