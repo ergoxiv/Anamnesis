@@ -264,15 +264,6 @@ public class Bone : ITransform
 		return depth;
 	}
 
-	/// <summary>Synchronizes the bone with its transform memories.</summary>
-	public virtual void Synchronize()
-	{
-		foreach (TransformMemory transformMemory in this.TransformMemories)
-			transformMemory.Synchronize();
-
-		this.ReadTransform();
-	}
-
 	/// <summary>Reads the transform of the bone from game memory or a snapshot.</summary>
 	/// <remarks>
 	/// Snapshots are primarily used by the skeleton object to optimize memory reads.

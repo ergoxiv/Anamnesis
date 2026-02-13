@@ -465,8 +465,16 @@ public class TargetService : ServiceBase<TargetService>
 					if (a.IsDisposed)
 						return false;
 
-					// Ensure the actor data is up to date
-					a.Synchronize(exclGroups: ExcludeSkeletonGroup);
+					try
+					{
+						// Ensure the actor data is up to date
+						a.Synchronize();
+					}
+					catch (Exception ex)
+					{
+						Log.Warning(ex, $"Failed to synchronize actor {a.Name} at address {a.Address:X}");
+						return false;
+					}
 
 					if (a.IsHidden)
 						return false;
