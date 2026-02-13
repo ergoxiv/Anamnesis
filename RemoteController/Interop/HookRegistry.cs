@@ -74,7 +74,7 @@ public sealed class HookRegistry
 	/// <exception cref="InvalidOperationException">
 	/// Thrown if the signature for the delegate type cannot be resolved or if hook creation fails.
 	/// </exception>
-	public static IHook<T> CreateAndActivateHook<T>(T detour)
+	public static FunctionHook<T> CreateAndActivateHook<T>(T detour, HookBehavior behavior = HookBehavior.Replace)
 		where T : Delegate
 	{
 		string delegateKey = HookUtils.GetKey(typeof(T));
@@ -85,8 +85,8 @@ public sealed class HookRegistry
 		var hook = s_reloadedHooks.Value.CreateHook(detour, address);
 		hook.Activate();
 		Log.Information($"Created and activated hook for {delegateKey} at 0x{address:X}");
-		
-		return hook;
+
+		return new FunctionHook<T>(0, delegateKey, behavior, address, hook);
 	}
 
 	/// <summary>
@@ -104,7 +104,8 @@ public sealed class HookRegistry
 	/// <exception cref="InvalidOperationException">
 	/// Thrown if the signature for the delegate type cannot be resolved or if wrapper creation fails.
 	/// </exception>
-	public static T? CreateWrapper<T>(out nint wrapperAddress)
+	public static FunctionWrapper<T> CreateWrapper<T>(out nint wrapperAddress)
+		where T : Delegate
 	{
 		string delegateKey = HookUtils.GetKey(typeof(T));
 		nint address = Controller.SigResolver?.Resolve(delegateKey) ?? 0;
@@ -113,7 +114,7 @@ public sealed class HookRegistry
 
 		var wrapper = s_reloadedHooks.Value.CreateWrapper<T>(address, out wrapperAddress);
 		Log.Information($"Created wrapper for {delegateKey} at 0x{address:X}");
-		return wrapper;
+		return new FunctionWrapper<T>(0, delegateKey, address, wrapper);
 	}
 
 	/// <summary>

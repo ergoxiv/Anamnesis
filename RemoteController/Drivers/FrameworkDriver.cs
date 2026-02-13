@@ -25,7 +25,7 @@ public class FrameworkDriver : DriverBase<FrameworkDriver>
 	private static readonly ConcurrentQueue<WorkItem> s_marshaledWork = new();
 	private static readonly ConcurrentBag<WorkItem> s_workItemPool = new();
 
-	private readonly IHook<Framework.Tick> tickHook;
+	private readonly FunctionHook<Framework.Tick> tickHook;
 	private readonly Framework.Tick detourTick;
 	private volatile int isSyncEnabled = 0;
 	private int requestVersion = 0;
@@ -116,14 +116,11 @@ public class FrameworkDriver : DriverBase<FrameworkDriver>
 	/// <inheritdoc/>
 	protected override void OnDispose()
 	{
-		this.tickHook.Disable();
-		if (this.tickHook is IDisposable disposable)
-		{
-			disposable.Dispose();
-		}
-
+		this.tickHook.Dispose();
 		while (s_workItemPool.TryTake(out var item))
 			item.Dispose();
+
+		s_workItemPool.Clear();
 	}
 
 	private byte DetourTick(nint fPtr)

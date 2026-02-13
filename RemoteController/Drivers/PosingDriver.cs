@@ -30,15 +30,15 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 	// - "UpdateVisualPosition" and "UpdateVisualRotation" are hooked to prevent the game from updating the visual position and rotation of objects.
 
 	private readonly GposeDriver gposeDriver;
-	private readonly IHook<GameObject.SetPosition> hookSetPosition;
-	private readonly IHook<HkaPartialSkeleton.SetBoneModelTransform> hookPhysics;
-	private readonly IHook<HkaLookAtIkSolver.Solve> hookLookAt;
-	private readonly IHook<HkaPoseDelegate.CalculateBoneModelSpace> hookCalculateBone;
-	private readonly IHook<HkaPoseDelegate.SyncModelSpace> hookSyncModel;
-	private readonly IHook<BoneKineDriver.ApplyKineDriverTransforms> hookKineDriver;
-	private readonly IHook<GameObject.UpdateVisualPosition> hookUpdateVisualPosition;
-	private readonly IHook<GameObject.UpdateVisualRotation> hookUpdateVisualRotation;
-	private readonly IHook<GameObject.UpdateVisualScale> hookUpdateVisualScale;
+	private readonly FunctionHook<GameObject.SetPosition> hookSetPosition;
+	private readonly FunctionHook<HkaPartialSkeleton.SetBoneModelTransform> hookPhysics;
+	private readonly FunctionHook<HkaLookAtIkSolver.Solve> hookLookAt;
+	private readonly FunctionHook<HkaPoseDelegate.CalculateBoneModelSpace> hookCalculateBone;
+	private readonly FunctionHook<HkaPoseDelegate.SyncModelSpace> hookSyncModel;
+	private readonly FunctionHook<BoneKineDriver.ApplyKineDriverTransforms> hookKineDriver;
+	private readonly FunctionHook<GameObject.UpdateVisualPosition> hookUpdateVisualPosition;
+	private readonly FunctionHook<GameObject.UpdateVisualRotation> hookUpdateVisualRotation;
+	private readonly FunctionHook<GameObject.UpdateVisualScale> hookUpdateVisualScale;
 
 	private readonly GameObject.SetPosition setPositionDetour;
 	private readonly HkaPartialSkeleton.SetBoneModelTransform physicsDetour;
@@ -134,15 +134,15 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 		this.arePhysicsFrozen = false;
 		this.isWorldVisualStateFrozen = false;
 		
-		this.hookPhysics.Disable();
-		this.hookLookAt.Disable();
-		this.hookCalculateBone.Disable();
-		this.hookSyncModel.Disable();
-		this.hookKineDriver.Disable();
-		this.hookSetPosition.Disable();
-		this.hookUpdateVisualPosition.Disable();
-		this.hookUpdateVisualRotation.Disable();
-		this.hookUpdateVisualScale.Disable();
+		this.hookPhysics.Dispose();
+		this.hookLookAt.Dispose();
+		this.hookCalculateBone.Dispose();
+		this.hookSyncModel.Dispose();
+		this.hookKineDriver.Dispose();
+		this.hookSetPosition.Dispose();
+		this.hookUpdateVisualPosition.Dispose();
+		this.hookUpdateVisualRotation.Dispose();
+		this.hookUpdateVisualScale.Dispose();
 	}
 
 	private unsafe nint DetourSetBoneModelTransform(nint partialPtr, ulong boneId, HkaTransform4* transform, byte bUpdateSecondaryPose, byte bPropagate)

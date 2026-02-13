@@ -16,7 +16,7 @@ using System.Diagnostics.CodeAnalysis;
 public sealed class GposeDriver : DriverBase<GposeDriver>
 {
 	private readonly FrameworkDriver frameworkDriver;
-	private readonly GameMain.IsInGPose isInGposeWrapper;
+	private readonly FunctionWrapper<GameMain.IsInGPose> isInGposeWrapper;
 
 	private bool isInGpose;
 
@@ -49,7 +49,7 @@ public sealed class GposeDriver : DriverBase<GposeDriver>
 		this.RegisterInstance();
 
 		// Get initial reading
-		this.isInGpose = this.isInGposeWrapper();
+		this.isInGpose = this.isInGposeWrapper.OriginalFunction();
 	}
 
 	/// <summary>
@@ -70,7 +70,7 @@ public sealed class GposeDriver : DriverBase<GposeDriver>
 		if (this.DisposedValue)
 			return;
 
-		bool newState = this.isInGposeWrapper();
+		bool newState = this.isInGposeWrapper.OriginalFunction();
 		if (newState != this.isInGpose)
 		{
 			this.isInGpose = newState;
