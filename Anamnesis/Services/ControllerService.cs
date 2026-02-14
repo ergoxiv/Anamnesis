@@ -417,6 +417,10 @@ public class ControllerService : ServiceBase<ControllerService>
 		this.SendShutdownMessage();
 		this.isConnected = false;
 
+		// IMPORTANT: Shut down the background task first to stop the incoming message processing loop
+		// This should happen before we start disposing the object the loop depends on.
+		await base.Shutdown();
+
 		this.workPipeline?.Dispose();
 		this.workPipeline = null;
 		this.eventPipeline?.Dispose();
@@ -453,9 +457,11 @@ public class ControllerService : ServiceBase<ControllerService>
 		this.pendingEventSubscriptions.Clear();
 		this.pendingEventUnsubscriptions.Clear();
 		this.pendingDriverCommands.Clear();
+
 		this.outgoingEndpoint?.Dispose();
+		this.outgoingEndpoint = null;
 		this.incomingEndpoint?.Dispose();
-		await base.Shutdown();
+		this.incomingEndpoint = null;
 	}
 
 	/// <summary>
