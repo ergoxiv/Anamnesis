@@ -678,6 +678,8 @@ internal static partial class NativeFunctions
 	[Flags]
 	public enum ProcessAccessFlags : long
 	{
+		// --- Standard Access Rights ---
+
 		/// <summary>
 		/// Required to delete the object.
 		/// </summary>
@@ -705,6 +707,80 @@ internal static partial class NativeFunctions
 		/// Required to change the owner in the security descriptor for the object.
 		/// </summary>
 		WRITE_OWNER = 0x00080000L,
+
+		// --- Process-Specific Access Rights ---
+
+		/// <summary>
+		/// Required to terminate a process using TerminateProcess.
+		/// </summary>
+		PROCESS_TERMINATE = 0x0001L,
+
+		/// <summary>
+		/// Required to create a thread in the process.
+		/// </summary>
+		PROCESS_CREATE_THREAD = 0x0002L,
+
+		/// <summary>
+		/// Required to perform an operation on the address space of a process
+		/// (see VirtualProtectEx and WriteProcessMemory).
+		/// </summary>
+		PROCESS_VM_OPERATION = 0x0008L,
+
+		/// <summary>
+		/// Required to read memory in a process using ReadProcessMemory.
+		/// </summary>
+		PROCESS_VM_READ = 0x0010L,
+
+		/// <summary>
+		/// Required to write to memory in a process using WriteProcessMemory.
+		/// </summary>
+		PROCESS_VM_WRITE = 0x0020L,
+
+		/// <summary>
+		/// Required to duplicate a handle using DuplicateHandle.
+		/// </summary>
+		PROCESS_DUP_HANDLE = 0x0040L,
+
+		/// <summary>
+		/// Required to use this process as the parent process with
+		/// PROC_THREAD_ATTRIBUTE_PARENT_PROCESS.
+		/// </summary>
+		PROCESS_CREATE_PROCESS = 0x0080L,
+
+		/// <summary>
+		/// Required to set memory limits using SetProcessWorkingSetSize.
+		/// </summary>
+		PROCESS_SET_QUOTA = 0x0100L,
+
+		/// <summary>
+		/// Required to set certain information about a process, such as its
+		/// priority class (see SetPriorityClass).
+		/// </summary>
+		PROCESS_SET_INFORMATION = 0x0200L,
+
+		/// <summary>
+		/// Required to retrieve certain information about a process, such as
+		/// its token, exit code, and priority class (see OpenProcessToken).
+		/// </summary>
+		PROCESS_QUERY_INFORMATION = 0x0400L,
+
+		/// <summary>
+		/// Required to suspend or resume a process.
+		/// </summary>
+		PROCESS_SUSPEND_RESUME = 0x0800L,
+
+		/// <summary>
+		/// Required to retrieve certain information about a process
+		/// (see GetExitCodeProcess, GetPriorityClass, IsProcessInJob, QueryFullProcessImageName).
+		/// A handle that has the PROCESS_QUERY_INFORMATION access right is automatically
+		/// granted PROCESS_QUERY_LIMITED_INFORMATION.
+		/// </summary>
+		PROCESS_QUERY_LIMITED_INFORMATION = 0x1000L,
+
+		/// <summary>
+		/// All possible access rights for a process object.
+		/// </summary>
+		PROCESS_ALL_ACCESS = 0x1FFFFFL,
 	}
 
 	/// <summary>

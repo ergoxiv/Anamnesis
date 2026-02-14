@@ -414,6 +414,7 @@ public class ControllerService : ServiceBase<ControllerService>
 	/// <inheritdoc/>
 	public override async Task Shutdown()
 	{
+		this.SendShutdownMessage();
 		this.isConnected = false;
 
 		this.workPipeline?.Dispose();
@@ -1677,6 +1678,18 @@ public class ControllerService : ServiceBase<ControllerService>
 	private ushort GetNextSequence(uint hookIndex)
 	{
 		return (ushort)this.sequenceCounters.AddOrUpdate(hookIndex, 1, (_, v) => (ushort)((v + 1) & HookMessageId.MAX_SEQ_NUM));
+	}
+
+	private void SendShutdownMessage()
+	{
+		if (this.outgoingEndpoint == null)
+			return;
+
+		var header = new MessageHeader(0, type: PayloadType.Bye);
+		if (!this.outgoingEndpoint.Write(header, IPC_TIMEOUT_MS))
+		{
+			Log.Warning("Failed to send shutdown message to remote controller.");
+		}
 	}
 
 	private record HookRegistrationInfo(

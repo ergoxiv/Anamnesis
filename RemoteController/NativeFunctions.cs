@@ -10,6 +10,8 @@ using System.Runtime.InteropServices;
 /// </summary>
 internal static partial class NativeFunctions
 {
+	public const int PROCESS_STILL_ALIVE = 259;
+
 	/// <summary>
 	/// Specifies options for retrieving a module handle using native methods.
 	/// </summary>
@@ -134,31 +136,9 @@ internal static partial class NativeFunctions
 	[LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "GetModuleFileNameW")]
 	public static unsafe partial uint GetModuleFileName(IntPtr hModule, char* lpFilename, uint nSize);
 
-
-	/// <summary>
-	/// Waits until the specified object is in the signaled state or the time-out interval elapses.
-	///
-	/// To enter an alertable wait state, use the WaitForSingleObjectEx function.
-	/// To wait for multiple objects, use WaitForMultipleObjects.
-	/// </summary>
-	/// <param name="hHandle">
-	/// A handle to the object.
-	///
-	/// If this handle is closed while the wait is still pending, the function's behavior is undefined.
-	///
-	/// The handle must have the SYNCHRONIZE access right.
-	/// </param>
-	/// <param name="dwMilliseconds"></param>
-	/// The time-out interval, in milliseconds. If a nonzero value is specified, the function waits until
-	/// the object is signaled or the interval elapses. If dwMilliseconds is zero, the function does not
-	/// enter a wait state if the object is not signaled; it always returns immediately.
-	/// If dwMilliseconds is INFINITE, the function will return only when the object is signaled.
-	/// <returns>
-	/// If the function succeeds, the return value indicates the event that caused the function to return.
-	/// See <see cref="WaitResult"/> for possible return values.
-	/// </returns>
-	[LibraryImport("kernel32.dll", SetLastError = false)]
-	public static partial uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+	[LibraryImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	public static partial bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
 
 	/// <summary>
 	/// Closes an open object handle.
