@@ -249,7 +249,6 @@
   "Character_Data_PadjalMasculine": "角尊 (男)",
   "Character_Data_PadjalFeminine": "角尊 (女)",
   "Character_ExWeapons_Header": "武器扩展",
-  "Character_WarningGpose": "仅在非集体动作模式中可以改变外貌和装备。",
   "Character_WarningGposeWorldPosFrozen": "仅在世界位置未冻结时可以改变外貌和装备。",
   "Character_Action_AnimationData": "角色数据",
   "Character_Action_AnimationStatus": "动画状态",

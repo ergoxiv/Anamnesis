@@ -249,7 +249,6 @@
   "Character_Data_PadjalMasculine": "Padjal Мужчина",
   "Character_Data_PadjalFeminine": "Padjal Женщина",
   "Character_ExWeapons_Header": "Расширенные настройки оружия",
-  "Character_WarningGpose": "Настройки внешнего вида и экипировки могут быть изменены только ДО перехода в GPose.",
   "Character_WarningGposeWorldPosFrozen": "Appearance and Equipment can only be changed while world positions are not frozen.",
   "Character_Action_AnimationData": "Анимация",
   "Character_Action_AnimationStatus": "Статус анимации",

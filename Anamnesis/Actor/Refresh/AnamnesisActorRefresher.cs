@@ -20,16 +20,16 @@ public class AnamnesisActorRefresher : IActorRefresher
 {
 	public RedrawService RedrawService { get; } = new RedrawService();
 
-	public bool CanRefresh(ActorMemory actor)
+	public RefreshBlockedReason GetRefreshAvailability(ActorMemory actor)
 	{
-		// if (PoseService.Instance.IsEnabled)
-		//	 return false;
+		if (PoseService.Instance.IsEnabled)
+			return RefreshBlockedReason.PoseEnabled;
 
 		// Ana can't refresh world frozen actors
 		if (PoseService.Instance.FreezeWorldState)
-			return false;
+			return RefreshBlockedReason.WorldFrozen;
 
-		return true;
+		return RefreshBlockedReason.None;
 	}
 
 	public async Task RefreshActor(ActorMemory actor)

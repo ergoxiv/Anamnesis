@@ -249,7 +249,6 @@
   "Character_Data_PadjalMasculine": "Padjal Maskulin",
   "Character_Data_PadjalFeminine": "Padjal Feminin",
   "Character_ExWeapons_Header": "Erweiterte Waffen",
-  "Character_WarningGpose": "Aussehen und Ausrüstung können nur außerhalb von GPose geändert werden.",
   "Character_WarningGposeWorldPosFrozen": "Aussehen und Ausrüstung können nur geändert werden, wenn die Weltpositionen nicht eingefroren sind.",
   "Character_Action_AnimationData": "Animation Data",
   "Character_Action_AnimationStatus": "Animationsstatus",

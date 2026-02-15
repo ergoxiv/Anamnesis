@@ -166,7 +166,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 
 	private unsafe HkaTransform4* DetourCalculateBoneModelSpace(nint posePtr, int boneIdx)
 	{
-		if (this.isPosingEnabled && this.arePhysicsFrozen)
+		if (this.isPosingEnabled)
 		{
 			HkaPoseStruct* pose = (HkaPoseStruct*)posePtr;
 			
@@ -191,7 +191,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 
 	private void DetourSyncModelSpace(nint posePtr)
 	{
-		if (this.isPosingEnabled && this.arePhysicsFrozen)
+		if (this.isPosingEnabled)
 			return;
 
 		this.hookSyncModel.OriginalFunction(posePtr);

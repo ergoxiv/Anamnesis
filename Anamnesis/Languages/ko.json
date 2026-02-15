@@ -249,7 +249,6 @@
   "Character_Data_PadjalMasculine": "뿔의 아이 남성",
   "Character_Data_PadjalFeminine": "뿔의 아이 여성",
   "Character_ExWeapons_Header": "무기 상세",
-  "Character_WarningGpose": "외형과 장비는 단체 자세 안에서는 변경할 수 없습니다.",
   "Character_WarningGposeWorldPosFrozen": "Appearance and Equipment can only be changed while world positions are not frozen.",
   "Character_Action_AnimationData": "액터 데이터",
   "Character_Action_AnimationStatus": "애니메이션 상태",

@@ -301,8 +301,10 @@
 
   "Character_ExWeapons_Header": "Extended Weapons",
 
-  "Character_WarningGpose": "Appearance and Equipment can only be changed while not in Group Pose.",
-  "Character_WarningGposeWorldPosFrozen": "Appearance and Equipment can only be changed while world positions are not frozen.",
+  "Character_WarningGposeWorldPosFrozen": "Appearance and Equipment can only be changed while world state is not frozen.",
+  "Character_WarningNoRefresher": "No refresh method is available. Enable Penumbra or Brio integration in Settings > Connections.",
+  "Character_WarningOverworldInGpose": "Overworld actors cannot be refreshed while in Group Pose. Use a GPose actor instead.",
+  "Character_WarningPoseEnabled": "Appearance and Equipment cannot be changed while posing mode is enabled.",
 
   "Character_Action_AnimationData": "Actor Data",
   "Character_Action_AnimationStatus": "Animation Status",
