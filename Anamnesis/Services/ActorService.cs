@@ -332,6 +332,10 @@ public class ObjectHandle<T> : INotifyPropertyChanged, IDisposable
 					obj.Synchronize(inclGroups, exclGroups);
 			}
 		}
+		catch (Exception ex)
+		{
+			Log.Warning(ex, $"Failed to synchronize object handle at address: {this.Address}");
+		}
 		finally
 		{
 			ObjectHandleCache.ListPool.Return(targets);

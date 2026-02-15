@@ -10,6 +10,8 @@ using System.Runtime.InteropServices;
 /// </summary>
 internal static partial class NativeFunctions
 {
+	public const int PROCESS_STILL_ALIVE = 259;
+
 	/// <summary>
 	/// Specifies options for retrieving a module handle using native methods.
 	/// </summary>
@@ -22,6 +24,17 @@ internal static partial class NativeFunctions
 		GET_MODULE_HANDLE_EX_FLAG_PIN = 0x00000001,
 		GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT = 0x00000002,
 		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 0x00000004,
+	}
+
+	/// <summary>
+	/// An enum that represents the possible return values of the WaitForSingleObject function.
+	/// </summary>
+	public enum WaitResult : uint
+	{
+		WAIT_OBJECT_0 = 0x00000000,
+		WAIT_ABANDONED = 0x00000080,
+		WAIT_TIMEOUT = 0x00000102,
+		WAIT_FAILED = 0xFFFFFFFF,
 	}
 
 	/// <summary>
@@ -122,4 +135,26 @@ internal static partial class NativeFunctions
 	/// </returns>
 	[LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "GetModuleFileNameW")]
 	public static unsafe partial uint GetModuleFileName(IntPtr hModule, char* lpFilename, uint nSize);
+
+	[LibraryImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	public static partial bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
+	/// <summary>
+	/// Closes an open object handle.
+	/// </summary>
+	/// <param name="hObject">A valid handle to an open object.</param>
+	/// <returns>
+	/// If the function succeeds, the return value is nonzero.
+	///
+	/// If the function fails, the return value is zero.To get extended error information, call GetLastError.
+	///
+	/// If the application is running under a debugger, the function will throw an exception if it receives
+	/// either a handle value that is not valid or a pseudo-handle value. This can happen if you close a
+	/// handle twice, or if you call CloseHandle on a handle returned by the FindFirstFile function instead
+	/// of calling the FindClose function.
+	/// </returns>
+	[LibraryImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	public static partial bool CloseHandle(IntPtr hObject);
 }

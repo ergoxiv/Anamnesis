@@ -245,9 +245,9 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 				var importPoseInternal = (bool retryApply) =>
 				{
 					PoseService.Instance.SetEnabled(true);
-					PoseService.Instance.FreezeScale |= mode.HasFlagUnsafe(PoseMode.Scale);
-					PoseService.Instance.FreezeRotation |= mode.HasFlagUnsafe(PoseMode.Rotation);
-					PoseService.Instance.FreezePositions |= mode.HasFlagUnsafe(PoseMode.Position);
+					PoseService.Instance.IsEnabled |= mode.HasFlagUnsafe(PoseMode.Scale);
+					PoseService.Instance.IsEnabled |= mode.HasFlagUnsafe(PoseMode.Rotation);
+					PoseService.Instance.IsEnabled |= mode.HasFlagUnsafe(PoseMode.Position);
 
 					if (importOption == PoseImportOptions.SelectedBones)
 					{
@@ -396,7 +396,7 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 		foreach (var bone in sortedBones)
 		{
 			bone.Position = bonePositions[bone];
-			bone.WriteTransform(false);
+			bone.WriteTransform(false, false);
 		}
 	}
 
@@ -416,6 +416,9 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 		if (targetBone == null || targetBone.TransformMemory == null)
 			throw new ArgumentException("The target bone and its transform memory cannot be null");
 
+		if (targetBone.Name.StartsWith("iv_shiri") || targetBone.Name.StartsWith("iv_kougan"))
+			return;
+
 		CmQuaternion newRotation = targetBone.TransformMemory.Rotation.Mirror(); // character-relative transform
 		if (shouldFlip && targetBone.Name.EndsWith("_l"))
 		{
@@ -427,37 +430,29 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 			if (rightBone != null && rightBone.TransformMemory != null)
 			{
 				CmQuaternion rightRot = rightBone.TransformMemory.Rotation.Mirror();
-				foreach (TransformMemory transformMemory in targetBone.TransformMemories)
-				{
-					transformMemory.Rotation = rightRot;
-				}
-
-				targetBone.ReadTransform();
-
-				foreach (TransformMemory transformMemory in rightBone.TransformMemories)
-				{
-					transformMemory.Rotation = newRotation;
-				}
-
-				rightBone.ReadTransform();
+				ApplyRotation(targetBone, rightRot);
+				ApplyRotation(rightBone, newRotation);
+				SwapLinkedBones(targetBone, rightBone);
 			}
 			else
 			{
+				// No right counterpart, mirror in place
 				Log.Warning("could not find right bone of: " + targetBone.Name);
+				ApplyRotation(targetBone, newRotation);
+				SwapLinkedBones(targetBone, targetBone);
 			}
 		}
 		else if (shouldFlip && targetBone.Name.EndsWith("_r"))
 		{
-			// do nothing so it doesn't revert...
+			// Do nothing; this bone is handled when its "_l" counterpart is processed.
 		}
 		else
 		{
-			foreach (TransformMemory transformMemory in targetBone.TransformMemories)
-			{
-				transformMemory.Rotation = newRotation;
-			}
+			// Center bone or non-sided bone: mirror in place
+			ApplyRotation(targetBone, newRotation);
 
-			targetBone.ReadTransform();
+			// Check if this center bone has left/right linked bone pairs that need swapping
+			SwapLinkedBones(targetBone, targetBone);
 		}
 
 		if (PoseService.Instance.EnableParenting)
@@ -466,6 +461,67 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 			{
 				FlipBoneInternal(child, shouldFlip);
 			}
+		}
+	}
+
+	private static void ApplyRotation(Bone bone, CmQuaternion rotation)
+	{
+		foreach (TransformMemory transformMemory in bone.TransformMemories)
+		{
+			transformMemory.Rotation = rotation;
+		}
+
+		bone.ReadTransform();
+	}
+
+	private static void SwapLinkedBones(Bone leftParent, Bone rightParent)
+	{
+		if (!leftParent.EnableLinkedBones && !rightParent.EnableLinkedBones)
+			return;
+
+		HashSet<Bone> processed = new();
+		foreach (var linkL in leftParent.LinkedBones)
+		{
+			if (processed.Contains(linkL) || linkL.TransformMemory == null)
+				continue;
+
+			processed.Add(linkL);
+			CmQuaternion mirrorL = linkL.TransformMemory.Rotation.Mirror();
+			bool swapped = false;
+
+			// Try to find a matching bone in the right parent's links
+			// We match based on name conventions (replacing _l with _r)
+			if (linkL.Name.EndsWith("_l"))
+			{
+				string expectedRightName = string.Concat(linkL.Name.AsSpan(0, linkL.Name.Length - 2), "_r");
+				var linkR = rightParent.LinkedBones.FirstOrDefault(b => b.Name == expectedRightName);
+
+				if (linkR != null && linkR.TransformMemory != null)
+				{
+					CmQuaternion mirrorR = linkR.TransformMemory.Rotation.Mirror();
+					ApplyRotation(linkL, mirrorR); // Put right rotation on left link
+					ApplyRotation(linkR, mirrorL); // Put left rotation on right link
+
+					processed.Add(linkR);
+					swapped = true;
+				}
+			}
+
+			// If no pair was found, just mirror the left link in place
+			if (!swapped)
+			{
+				ApplyRotation(linkL, mirrorL);
+			}
+		}
+
+		// Process any remaining right parent links that weren't swapped
+		foreach (var linkR in rightParent.LinkedBones)
+		{
+			if (processed.Contains(linkR) || linkR.TransformMemory == null)
+				continue;
+
+			// Mirror in place
+			ApplyRotation(linkR, linkR.TransformMemory.Rotation.Mirror());
 		}
 	}
 
@@ -488,7 +544,7 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 		{
 			List<Bone> boneChildren = targetBone.GetDescendants();
 			foreach (var childBone in boneChildren)
-			{
+		{
 				bonePositions.Add(childBone, childBone.Position);
 			}
 		}
