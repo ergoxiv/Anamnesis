@@ -23,7 +23,7 @@ public static class Camera
 
 public static class Character
 {
-	[FunctionBind("40 53 48 83 EC 20 80 B9 ?? ?? ?? ?? ?? 48 8B D9 7D 6E")]
+	[FunctionBind("40 53 48 83 EC 20 80 B9 ?? ?? ?? ?? ?? 48 8B D9 7D 61")]
 	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
 	public delegate long DisableDraw(nint objPtr);
 
@@ -68,7 +68,7 @@ public static class DrawDataContainer
 
 public static class Framework
 {
-	[FunctionBind("48 8D 05 ?? ?? ?? ?? 66 C7 41 ?? ?? ?? 48 89 01 48 8B F1", 0x20, SigResolveStrategy.VTableLookup)]
+	[FunctionBind("48 8D 05 ?? ?? ?? ?? ?? ?? ?? 48 8B F1 49 89 6B", 0x20, SigResolveStrategy.VTableLookup)]
 	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
 	public delegate byte Tick(nint fPtr);
 
@@ -98,7 +98,7 @@ public static class GameObject
 
 public static class GameMain
 {
-	[FunctionBind("E8 ?? ?? ?? ?? 83 7F ?? ?? 4C 8D 3D")]
+	[FunctionBind("E8 ?? ?? ?? ?? 41 83 7E ?? 00 4C 8D 3D")]
 	[UnmanagedFunctionPointer(CallingConvention.StdCall)]
 	public delegate bool IsInGPose();
 }
