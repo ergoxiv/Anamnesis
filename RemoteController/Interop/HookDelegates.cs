@@ -72,7 +72,7 @@ public static class Framework
 	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
 	public delegate byte Tick(nint fPtr);
 
-	[FunctionBind("40 53 55 57 41 55 48 83 EC ?? ?? 48 ?? ?? ?? ?? ?? ?? ?? 48")]
+	[FunctionBind("40 53 57 41 54 41 55 48 83 EC 58 65 48 8B 04 25 ?? ?? ?? ??")]
 	[UnmanagedFunctionPointer(CallingConvention.StdCall)]
 	public delegate void RenderGraphics(long a1);
 }
