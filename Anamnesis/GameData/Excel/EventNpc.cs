@@ -9,7 +9,6 @@ using Anamnesis.Services;
 using Anamnesis.TexTools;
 using Lumina;
 using Lumina.Excel;
-using Lumina.Excel.Sheets;
 
 /// <summary>
 /// Represents an event non-player character (NPC) in the game data.
@@ -46,7 +45,7 @@ public readonly unsafe struct EventNpc(ExcelPage page, uint offset, uint row)
 	/// <summary>
 	/// Gets a ModelChara reference object of the NPC's model from the game data.
 	/// </summary>
-	public readonly RowRef<ModelChara> ModelChara => new(page.Module, (uint)page.ReadUInt16(offset + 190), page.Language);
+	public readonly RowRef<Lumina.Excel.Sheets.ModelChara> ModelChara => new(page.Module, (uint)page.ReadUInt16(offset + 190), page.Language);
 
 	/// <inheritdoc/>
 	public ImgRef? Icon => null;
