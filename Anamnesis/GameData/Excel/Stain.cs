@@ -67,7 +67,7 @@ public readonly struct Stain(ExcelPage page, uint offset, uint row)
 	public readonly string Description => string.Empty;
 
 	/// <summary>Gets the stain's shade.</summary>
-	public readonly byte Shade => page.ReadUInt8(offset + 12);
+	public readonly byte Shade => page.ReadUInt8(offset + 20);
 
 	/// <inheritdoc/>
 	public readonly Brush? Color
