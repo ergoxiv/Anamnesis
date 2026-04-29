@@ -10,8 +10,8 @@ public class ExtendedAppearanceMemory : MemoryBase
 	[Bind(0x10)] public Color4 MouthColor { get; set; }
 	[Bind(0x20)] public Color HairColor { get; set; }
 	[Bind(0x30)] public Color HairHighlight { get; set; }
-	[Bind(0x40)] public Color RightEyeColor { get; set; } // (From the perspective of the character facing the camera)
-	[Bind(0x50)] public Color LeftEyeColor { get; set; } // (From the perspective of the character facing the camera)
+	[Bind(0x40)] public Color LeftEyeColor { get; set; }
+	[Bind(0x50)] public Color RightEyeColor { get; set; }
 	[Bind(0x60)] public Color LimbalRingColor { get; set; }
 
 	public bool Freeze
