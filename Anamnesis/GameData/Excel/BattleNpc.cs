@@ -13,7 +13,7 @@ using Lumina.Excel.Sheets;
 using System;
 
 /// <summary>Represents a base battle non-player entity from the game data.</summary>
-[Sheet("BNpcBase", 0xD5D82616)]
+[Sheet("BNpcBase", 0xAD223303)]
 public readonly struct BattleNpc(ExcelPage page, uint offset, uint row)
 	: IExcelRow<BattleNpc>, INpcBase
 {
