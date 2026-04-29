@@ -33,14 +33,10 @@
 			</ListBox.ItemsPanel>
 			<ListBox.ItemTemplate>
 				<DataTemplate>
-					<Rectangle Margin="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+					<Rectangle Margin="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Fill="{Binding Brush}">
 						<Rectangle.ToolTip>
-							<TextBlock Text="{Binding Entry.Hex}"/>
+							<TextBlock Text="{Binding Entry.Hex, Mode=OneWay}"/>
 						</Rectangle.ToolTip>
-						
-						<Rectangle.Fill>
-							<SolidColorBrush Color="{Binding Entry.WpfColor}"/>
-						</Rectangle.Fill>
 					</Rectangle>
 				</DataTemplate>
 			</ListBox.ItemTemplate>

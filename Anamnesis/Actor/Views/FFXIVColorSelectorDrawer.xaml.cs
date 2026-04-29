@@ -8,6 +8,7 @@ using Anamnesis.Services;
 using PropertyChanged;
 using System.Collections.Generic;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 /// <summary>
 /// Interaction logic for FxivColorSelectorDrawer.xaml.
@@ -105,5 +106,6 @@ public partial class FxivColorSelectorDrawer : UserControl, IDrawer
 	{
 		public ColorData.Entry Entry { get; set; }
 		public int Index { get; set; }
+		public SolidColorBrush Brush => new(this.Entry.WpfColor);
 	}
 }
