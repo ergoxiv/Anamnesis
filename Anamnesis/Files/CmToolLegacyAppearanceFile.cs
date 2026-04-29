@@ -201,16 +201,13 @@ public class CmToolLegacyAppearanceFile : JsonFileBase, IUpgradeCharacterFile
 		// extended appearance
 		// NOTE: extended weapon values are stored in the WeaponSave
 		file.SkinColor = GetColor(this.SkinRedPigment, this.SkinGreenPigment, this.SkinBluePigment);
-		file.SkinGloss = GetColor(this.SkinRedGloss, this.SkinGreenGloss, this.SkinBlueGloss);
 		file.LeftEyeColor = GetColor(this.LeftEyeRed, this.LeftEyeGreen, this.LeftEyeBlue);
 		file.RightEyeColor = GetColor(this.RightEyeRed, this.RightEyeGreen, this.RightEyeBlue);
 		file.LimbalRingColor = GetColor(this.LimbalR, this.LimbalG, this.LimbalB);
 		file.HairColor = GetColor(this.HairRedPigment, this.HairGreenPigment, this.HairBluePigment);
-		////file.HairGloss = this.GetColor(this.HairGlowRed, this.HairGlowGreen, this.HairGlowRed);
 		file.HairHighlight = GetColor(this.HairGlowRed, this.HairGlowGreen, this.HairGlowRed);
 		file.MouthColor = GetColor4(this.LipsR, this.LipsG, this.LipsB, this.LipsBrightness);
 		file.BustScale = GetVector(this.BustX, this.BustY, this.BustZ);
-		////file.Transparency =
 		file.MuscleTone = (float?)this.MuscleTone?.value;
 		file.HeightMultiplier = (float?)this.Height?.value;
 

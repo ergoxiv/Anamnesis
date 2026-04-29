@@ -323,6 +323,7 @@ public partial class ColorSelectorDrawer : UserControl, IDrawer, INotifyProperty
 		}
 
 		public WpfColor Color { get; set; }
+		public SolidColorBrush ColorBrush => new(this.Color);
 		public string Name { get; set; }
 
 		public Color4 AsColor()

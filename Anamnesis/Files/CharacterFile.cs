@@ -98,12 +98,10 @@ public class CharacterFile : JsonFileBase
 	// extended appearance
 	// NOTE: extended weapon values are stored in the WeaponSave
 	public Color? SkinColor { get; set; }
-	public Color? SkinGloss { get; set; }
 	public Color? LeftEyeColor { get; set; }
 	public Color? RightEyeColor { get; set; }
 	public Color? LimbalRingColor { get; set; }
 	public Color? HairColor { get; set; }
-	public Color? HairGloss { get; set; }
 	public Color? HairHighlight { get; set; }
 	public Color4? MouthColor { get; set; }
 	public Vector3? BustScale { get; set; }
@@ -208,7 +206,6 @@ public class CharacterFile : JsonFileBase
 			this.HairTone = drawData.Customize?.HairTone;
 			this.Highlights = drawData.Customize?.Highlights;
 			this.HairColor = actor.ModelObject?.ExtendedAppearance?.HairColor;
-			this.HairGloss = actor.ModelObject?.ExtendedAppearance?.HairGloss;
 			this.HairHighlight = actor.ModelObject?.ExtendedAppearance?.HairHighlight;
 		}
 
@@ -251,7 +248,6 @@ public class CharacterFile : JsonFileBase
 
 			this.HeightMultiplier = actor.ModelObject?.Height;
 			this.SkinColor = actor.ModelObject?.ExtendedAppearance?.SkinColor;
-			this.SkinGloss = actor.ModelObject?.ExtendedAppearance?.SkinGloss;
 			this.MuscleTone = actor.ModelObject?.ExtendedAppearance?.MuscleTone;
 			this.BustScale = actor.ModelObject?.Bust?.Scale;
 			this.Transparency = actor.Transparency;
@@ -548,7 +544,6 @@ public class CharacterFile : JsonFileBase
 			if (this.IncludeSection(SaveModes.AppearanceHair, mode))
 			{
 				actor.ModelObject.ExtendedAppearance.HairColor = this.HairColor ?? actor.ModelObject.ExtendedAppearance.HairColor;
-				actor.ModelObject.ExtendedAppearance.HairGloss = this.HairGloss ?? actor.ModelObject.ExtendedAppearance.HairGloss;
 				actor.ModelObject.ExtendedAppearance.HairHighlight = this.HairHighlight ?? actor.ModelObject.ExtendedAppearance.HairHighlight;
 			}
 
@@ -563,7 +558,6 @@ public class CharacterFile : JsonFileBase
 			if (this.IncludeSection(SaveModes.AppearanceBody, mode))
 			{
 				actor.ModelObject.ExtendedAppearance.SkinColor = this.SkinColor ?? actor.ModelObject.ExtendedAppearance.SkinColor;
-				actor.ModelObject.ExtendedAppearance.SkinGloss = this.SkinGloss ?? actor.ModelObject.ExtendedAppearance.SkinGloss;
 				actor.ModelObject.ExtendedAppearance.MuscleTone = this.MuscleTone ?? actor.ModelObject.ExtendedAppearance.MuscleTone;
 				actor.Transparency = this.Transparency ?? actor.Transparency;
 
@@ -767,9 +761,7 @@ public class CharacterFile : JsonFileBase
 		private static bool CheckExtendedAppearanceChanges(CharacterFile c, CharacterFile t, CharacterFile.SaveModes mode)
 		{
 			if (mode.HasFlagUnsafe(CharacterFile.SaveModes.AppearanceHair) &&
-				(c.HairColor != t.HairColor ||
-				c.HairGloss != t.HairGloss ||
-				c.HairHighlight != t.HairHighlight))
+				(c.HairColor != t.HairColor || c.HairHighlight != t.HairHighlight))
 				return true;
 
 			if (mode.HasFlagUnsafe(CharacterFile.SaveModes.AppearanceFace) &&
@@ -781,7 +773,6 @@ public class CharacterFile : JsonFileBase
 
 			if (mode.HasFlagUnsafe(CharacterFile.SaveModes.AppearanceBody) &&
 				(c.SkinColor != t.SkinColor ||
-				c.SkinGloss != t.SkinGloss ||
 				c.MuscleTone != t.MuscleTone ||
 				c.HeightMultiplier != t.HeightMultiplier ||
 				c.BustScale != t.BustScale ||

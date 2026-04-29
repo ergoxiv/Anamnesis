@@ -11,6 +11,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using XivToolsWpf.DependencyProperties;
+using static Anamnesis.Actor.Utilities.ColorData;
 using WpfColor = System.Windows.Media.Color;
 
 /// <summary>
@@ -32,21 +33,7 @@ public partial class ColorControl : UserControl
 		this.ContentArea.DataContext = this;
 	}
 
-	public enum ColorType
-	{
-		Skin,
-		Eyes,
-		Lips,
-		FacePaint,
-		Hair,
-		HairHighlights,
-	}
-
-	public ColorType Type
-	{
-		get;
-		set;
-	}
+	public CustomizeColorOption Type { get; set; }
 
 	public ActorCustomizeMemory.Genders Gender
 	{
@@ -129,12 +116,13 @@ public partial class ColorControl : UserControl
 
 		return this.Type switch
 		{
-			ColorType.Skin => ColorData.GetSkin(this.Tribe, this.Gender),
-			ColorType.Eyes => ColorData.GetEyeColors(),
-			ColorType.Lips => ColorData.GetLipColors(),
-			ColorType.FacePaint => ColorData.GetFacePaintColor(),
-			ColorType.Hair => ColorData.GetHair(this.Tribe, this.Gender),
-			ColorType.HairHighlights => ColorData.GetHairHighlights(),
+			CustomizeColorOption.Skin => ColorData.GetSkin(this.Tribe, this.Gender),
+			CustomizeColorOption.Eyes => ColorData.GetEyeColors(),
+			CustomizeColorOption.Lips => ColorData.GetLipColors(),
+			CustomizeColorOption.FacePaint => ColorData.GetFacePaintColor(),
+			CustomizeColorOption.Hair => ColorData.GetHair(this.Tribe, this.Gender),
+			CustomizeColorOption.HairHighlights => ColorData.GetHairHighlightColors(),
+			CustomizeColorOption.FacialFeature => ColorData.GetFacialFeatureColor(),
 			_ => throw new Exception("Unsupported color type: " + this.Type),
 		};
 	}

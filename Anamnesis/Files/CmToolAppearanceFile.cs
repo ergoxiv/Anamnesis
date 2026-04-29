@@ -138,9 +138,6 @@ public class CmToolAppearanceFile : JsonFileBase, IUpgradeCharacterFile
 			if (this.characterDetails?.SkinRedPigment != null && this.characterDetails.SkinGreenPigment != null && this.characterDetails.SkinBluePigment != null)
 				file.SkinColor = new Color((float)this.characterDetails.SkinRedPigment.value, (float)this.characterDetails.SkinGreenPigment.value, (float)this.characterDetails.SkinBluePigment.value);
 
-			if (this.characterDetails?.SkinRedGloss != null && this.characterDetails.SkinGreenGloss != null && this.characterDetails.SkinBlueGloss != null)
-				file.SkinGloss = new Color((float)this.characterDetails.SkinRedGloss.value, (float)this.characterDetails.SkinGreenGloss.value, (float)this.characterDetails.SkinBlueGloss.value);
-
 			if (this.characterDetails?.LeftEyeRed != null && this.characterDetails.LeftEyeGreen != null && this.characterDetails.LeftEyeBlue != null)
 				file.LeftEyeColor = new Color((float)this.characterDetails.LeftEyeRed.value, (float)this.characterDetails.LeftEyeGreen.value, (float)this.characterDetails.LeftEyeBlue.value);
 
@@ -152,9 +149,6 @@ public class CmToolAppearanceFile : JsonFileBase, IUpgradeCharacterFile
 
 			if (this.characterDetails?.HairRedPigment != null && this.characterDetails.HairGreenPigment != null && this.characterDetails.HairBluePigment != null)
 				file.HairColor = new Color((float)this.characterDetails.HairRedPigment.value, (float)this.characterDetails.HairGreenPigment.value, (float)this.characterDetails.HairBluePigment.value);
-
-			if (this.characterDetails?.HairGlowRed != null && this.characterDetails.HairGlowGreen != null && this.characterDetails.HairGlowBlue != null)
-				file.HairGloss = new Color((float)this.characterDetails.HairGlowRed.value, (float)this.characterDetails.HairGlowGreen.value, (float)this.characterDetails.HairGlowBlue.value);
 
 			if (this.characterDetails?.HighlightRedPigment != null && this.characterDetails.HighlightGreenPigment != null && this.characterDetails.HighlightBluePigment != null)
 				file.HairHighlight = new Color((float)this.characterDetails.HighlightRedPigment.value, (float)this.characterDetails.HighlightGreenPigment.value, (float)this.characterDetails.HighlightBluePigment.value);

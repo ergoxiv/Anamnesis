@@ -8,7 +8,7 @@ using Lumina.Excel.Sheets;
 using System.Collections.Generic;
 
 /// <summary>Represents a territory type in the game data.</summary>
-[Sheet("TerritoryType", 0x77B34BBB)]
+[Sheet("TerritoryType", 0xFACF0E83)]
 public readonly struct Territory(ExcelPage page, uint offset, uint row)
 	: IExcelRow<Territory>
 {

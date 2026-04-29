@@ -14,7 +14,7 @@ using MediaColor = System.Windows.Media.Color;
 /// <summary>
 /// Represents a stain in the game data, which includes information about dyes and their associated items.
 /// </summary>
-[Sheet("Stain", 0x97C471BD)]
+[Sheet("Stain", 0x346C5926)]
 public readonly struct Stain(ExcelPage page, uint offset, uint row)
 	: IExcelRow<Stain>, IDye, IEquatable<Stain>
 {
@@ -58,7 +58,7 @@ public readonly struct Stain(ExcelPage page, uint offset, uint row)
 	public readonly byte Id => (byte)this.RowId;
 
 	/// <summary>Gets the stain's name.</summary>
-	public readonly string Name => page.ReadString(offset, offset).ToString() ?? string.Empty;
+	public readonly string Name => page.ReadString(offset + 4, offset).ToString() ?? string.Empty;
 
 	/// <summary>Gets the stain's description.</summary>
 	/// <remarks>
@@ -67,7 +67,7 @@ public readonly struct Stain(ExcelPage page, uint offset, uint row)
 	public readonly string Description => string.Empty;
 
 	/// <summary>Gets the stain's shade.</summary>
-	public readonly byte Shade => page.ReadUInt8(offset + 12);
+	public readonly byte Shade => page.ReadUInt8(offset + 20);
 
 	/// <inheritdoc/>
 	public readonly Brush? Color

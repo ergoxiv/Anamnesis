@@ -8,12 +8,36 @@ using Anamnesis.Services;
 using Serilog;
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using cmColor = Anamnesis.Memory.Color;
 using wpfColor = System.Windows.Media.Color;
 
 public static class ColorData
 {
+	// Compile-time assertions to ensure that enums have expected starting value for correct address calculation.
+	private const int GENDER_ASSERT = 1 / (ActorCustomizeMemory.Genders.Masculine == 0 ? 1 : 0);
+	private const int TRIBE_ASSERT = 1 / (ActorCustomizeMemory.Tribes.Midlander == (ActorCustomizeMemory.Tribes)1 ? 1 : 0);
+
+	private const int COLOR_BYTE_SIZE = 4;
+	private const int UNIQUE_BASE_OFFSET = 0x4800;
+	private const int CHUNK_BYTE_SIZE = 0x1400;
+	private const int PALETTE_BYTE_SIZE = 0x400;
+
+	private const int UNIQUE_BASE_INDEX = UNIQUE_BASE_OFFSET / COLOR_BYTE_SIZE;
+	private const int CHUNK_COLORS_SIZE = CHUNK_BYTE_SIZE / COLOR_BYTE_SIZE;
+	private const int COLORS_PER_PALETTE = PALETTE_BYTE_SIZE / COLOR_BYTE_SIZE;
+
 	private static readonly Entry[] s_colors = [];
+	private static readonly Dictionary<CustomizeColorOption, OptionConfig> s_configs = new()
+	{
+		{ CustomizeColorOption.Skin,           new() { OptionsCount = 192, PaletteIndex = 3,  IsUnique = true,  IsPaletteSplit = false } },
+		{ CustomizeColorOption.Hair,           new() { OptionsCount = 208, PaletteIndex = 4,  IsUnique = true,  IsPaletteSplit = false } },
+		{ CustomizeColorOption.HairHighlights, new() { OptionsCount = 192, PaletteIndex = 1,  IsUnique = false, IsPaletteSplit = false } },
+		{ CustomizeColorOption.Eyes,           new() { OptionsCount = 192, PaletteIndex = 0,  IsUnique = false, IsPaletteSplit = false } },
+		{ CustomizeColorOption.FacialFeature,  new() { OptionsCount = 192, PaletteIndex = 0,  IsUnique = false, IsPaletteSplit = false } },
+		{ CustomizeColorOption.FacePaint,      new() { OptionsCount = 96,  PaletteIndex = 13, IsUnique = false, IsPaletteSplit = true } },
+		{ CustomizeColorOption.Lips,           new() { OptionsCount = 96,  PaletteIndex = 13, IsUnique = false, IsPaletteSplit = true } },
+	};
 
 	static ColorData()
 	{
@@ -21,31 +45,29 @@ public static class ColorData
 
 		try
 		{
-			byte[] buffer = GameDataService.GetFileData("chara/xls/charamake/human.cmp");
-
-			int at = 0;
-			while (at < buffer.Length)
+			byte[]? buffer = GameDataService.GetFileData("chara/xls/charamake/human.cmp");
+			if (buffer != null)
 			{
-				int r = buffer[at + 0] & 0xFF;
-				int g = buffer[at + 1] & 0xFF;
-				int b = buffer[at + 2] & 0xFF;
-				int a = buffer[at + 3] & 0xFF;
+				int at = 0;
+				while (at < buffer.Length)
+				{
+					byte r = buffer[at];
+					byte g = buffer[at + 1];
+					byte b = buffer[at + 2];
+					byte a = buffer[at + 3];
 
-				Entry entry = default;
-				entry.CmColor = new cmColor(r / 255.0f, g / 255.0f, b / 255.0f);
+					colors.Add(new Entry
+					{
+						CmColor = new cmColor(r / 255.0f, g / 255.0f, b / 255.0f),
+						WpfColor = wpfColor.FromArgb(a, r, g, b),
+					});
 
-				wpfColor c2 = (wpfColor)entry.WpfColor;
-				c2.R = buffer[at + 0];
-				c2.G = buffer[at + 1];
-				c2.B = buffer[at + 2];
-				c2.A = buffer[at + 3];
-				entry.WpfColor = c2;
-
-				////= new Color.FromArgb((a << 24) | (r << 16) | (g << 8) | b);
-
-				colors.Add(entry);
-
-				at += 4;
+					at += COLOR_BYTE_SIZE;
+				}
+			}
+			else
+			{
+				Log.Warning("Game color data file is empty or missing. Character color data will not be available.");
 			}
 		}
 		catch (Exception ex)
@@ -56,82 +78,99 @@ public static class ColorData
 		s_colors = colors.ToArray();
 	}
 
+	public enum CustomizeColorOption
+	{
+		Skin,
+		Hair,
+		HairHighlights,
+		Eyes,
+		FacialFeature,
+		FacePaint,
+		Lips,
+	}
+
+	private enum PaletteCategories : uint
+	{
+		Unk1 = 1,
+		Unk2 = 2,
+		Skin = 3,
+		Hair = 4,
+		Unk3 = 5,
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static Entry[] GetSkin(ActorCustomizeMemory.Tribes tribe, ActorCustomizeMemory.Genders gender)
-	{
-		int from = GetTribeSkinStartIndex(tribe, gender);
-		return Span(from, 192);
-	}
+		=> GetColors(CustomizeColorOption.Skin, tribe, gender);
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static Entry[] GetHair(ActorCustomizeMemory.Tribes tribe, ActorCustomizeMemory.Genders gender)
-	{
-		int from = GetTribeHairStartIndex(tribe, gender);
-		return Span(from, 192);
-	}
+		=> GetColors(CustomizeColorOption.Hair, tribe, gender);
 
-	public static Entry[] GetHairHighlights()
-	{
-		return Span(256, 192);
-	}
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Entry[] GetHairHighlightColors() => GetColors(CustomizeColorOption.HairHighlights);
 
-	public static Entry[] GetEyeColors()
-	{
-		return Span(0, 192);
-	}
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Entry[] GetEyeColors() => GetColors(CustomizeColorOption.Eyes);
 
-	public static Entry[] GetLimbalColors()
-	{
-		return Span(0, 192);
-	}
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Entry[] GetFacialFeatureColor() => GetColors(CustomizeColorOption.FacialFeature);
 
-	public static Entry[] GetFacePaintColor()
-	{
-		return Span(512, 224);
-	}
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Entry[] GetFacePaintColor() => GetColors(CustomizeColorOption.FacePaint);
 
-	public static Entry[] GetLipColors()
-	{
-		var entries = new List<Entry>();
-		entries.AddRange(Span(512, 96));
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Entry[] GetLipColors() => GetColors(CustomizeColorOption.Lips);
 
-		for (int i = 0; i < 32; i++)
+	internal static Entry[] GetColors(CustomizeColorOption option, ActorCustomizeMemory.Tribes tribe = default, ActorCustomizeMemory.Genders gender = default)
+	{
+		var config = s_configs[option];
+
+		if (config.IsPaletteSplit)
 		{
-			Entry entry = default;
-			entry.Skip = true;
-			entries.Add(entry);
+			var entries = new List<Entry>((config.OptionsCount * 2) + 32);
+
+			int paintBaseIndex = config.PaletteIndex * COLORS_PER_PALETTE;
+			entries.AddRange(Span(paintBaseIndex, config.OptionsCount));
+
+			for (int i = 0; i < 32; i++)
+			{
+				entries.Add(new Entry { Skip = true });
+			}
+
+			int secondPaintIndex = paintBaseIndex + (COLORS_PER_PALETTE / 2);
+			entries.AddRange(Span(secondPaintIndex, config.OptionsCount));
+
+			return entries.ToArray();
 		}
 
-		entries.AddRange(Span(1792, 96));
+		int startIndex = config.IsUnique
+			? GetEntryIndex(tribe, gender, (uint)config.PaletteIndex)
+			: config.PaletteIndex * COLORS_PER_PALETTE;
 
-		return entries.ToArray();
+		if (config.IsUnique)
+		{
+			Log.Verbose("Getting colors for Option: {Option}, Tribe: {Tribe}, Gender: {Gender}", option, tribe, gender);
+			Log.Verbose("Calculated index: {Index}", startIndex);
+		}
+
+		return Span(startIndex, config.OptionsCount);
 	}
 
 	private static Entry[] Span(int from, int count)
 	{
+		if (s_colors.Length <= from)
+			return new Entry[count];
+
 		Entry[] entries = new Entry[count];
-
-		if (s_colors.Length <= 0)
-			return entries;
-
-		Array.Copy(s_colors, from, entries, 0, count);
+		int actualCount = Math.Min(count, s_colors.Length - from);
+		Array.Copy(s_colors, from, entries, 0, actualCount);
 		return entries;
 	}
 
-	private static int GetTribeSkinStartIndex(ActorCustomizeMemory.Tribes tribe, ActorCustomizeMemory.Genders gender)
+	private static int GetEntryIndex(ActorCustomizeMemory.Tribes tribe, ActorCustomizeMemory.Genders gender, uint paletteIndex)
 	{
-		bool isMasculine = gender == ActorCustomizeMemory.Genders.Masculine;
-
-		int genderValue = isMasculine ? 0 : 1;
-		int listIndex = ((((int)tribe * 2) + genderValue) * 5) + 3;
-		return listIndex * 256;
-	}
-
-	private static int GetTribeHairStartIndex(ActorCustomizeMemory.Tribes tribe, ActorCustomizeMemory.Genders gender)
-	{
-		bool isMasculine = gender == ActorCustomizeMemory.Genders.Masculine;
-
-		int genderValue = isMasculine ? 0 : 1;
-		int listIndex = ((((int)tribe * 2) + genderValue) * 5) + 4;
-		return listIndex * 256;
+		int tribeGenderIndex = Math.Max(0, (((int)tribe - 1) * 2) + (int)gender);
+		return (int)(UNIQUE_BASE_INDEX + (tribeGenderIndex * CHUNK_COLORS_SIZE) + (paletteIndex * COLORS_PER_PALETTE));
 	}
 
 	public struct Entry
@@ -140,5 +179,13 @@ public static class ColorData
 		public cmColor CmColor { get; set; }
 		public wpfColor WpfColor { get; set; }
 		public bool Skip { get; set; }
+	}
+
+	private readonly struct OptionConfig
+	{
+		public int OptionsCount { get; init; }
+		public int PaletteIndex { get; init; }
+		public bool IsUnique { get; init; } // If true, then the palette is tribe-gender specific. Otherwise, it's a shared palette.
+		public bool IsPaletteSplit { get; init; } // If true, palette is split into light/dark halves.
 	}
 }
