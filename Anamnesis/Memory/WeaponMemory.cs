@@ -6,6 +6,7 @@ namespace Anamnesis.Memory;
 using Anamnesis.Actor.Utilities;
 using Anamnesis.Core.Extensions;
 using Anamnesis.GameData;
+using Anamnesis.Services;
 using PropertyChanged;
 using RemoteController.Interop.Types;
 using System;
@@ -178,6 +179,9 @@ public class WeaponMemory : MemoryBase, IEquipmentItemMemory
 
 	public void Clear(bool isPlayer)
 	{
+		if (GposeService.InstanceOrNull?.IsGpose != true)
+			return;
+
 		bool useEmperorsFists = true;
 
 		if (this.Parent is ActorMemory actor)
