@@ -864,11 +864,37 @@ internal static partial class NativeFunctions
 	/// </remarks>
 	public static void ApplyCustomAclToProcess(IntPtr hProcess)
 	{
-		var userName = Environment.UserName;
 		IntPtr pNewAcl = IntPtr.Zero;
+		IntPtr pOldDacl = IntPtr.Zero;
+		IntPtr pSecurityDescriptor = IntPtr.Zero;
+		IntPtr pSid = IntPtr.Zero;
 
 		try
 		{
+			var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+			if (identity.User == null)
+				throw new InvalidOperationException("Failed to establish current user SID.");
+
+			var sidBytes = new byte[identity.User.BinaryLength];
+			identity.User.GetBinaryForm(sidBytes, 0);
+
+			pSid = Marshal.AllocHGlobal(sidBytes.Length);
+			Marshal.Copy(sidBytes, 0, pSid, sidBytes.Length);
+
+			// Retrieve the existing DACL from the target process
+			uint result = GetSecurityInfo(
+				hProcess,
+				(uint)SeObjectType.SE_KERNEL_OBJECT,
+				(uint)SecurityInformation.DACL_SECURITY_INFORMATION,
+				IntPtr.Zero,
+				IntPtr.Zero,
+				out pOldDacl,
+				IntPtr.Zero,
+				out pSecurityDescriptor);
+
+			if (result != 0)
+				throw new Win32Exception((int)result, "Failed to retrieve existing security information.");
+
 			var explicitAccess = new ExplicitAccess
 			{
 				GrfAccessPermissions = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL,
@@ -877,14 +903,15 @@ internal static partial class NativeFunctions
 				Trustee = new Trustee
 				{
 					PMultipleTrustee = IntPtr.Zero,
-					MultipleTrusteeOperation = 0,
-					TrusteeForm = TrusteeForm.TRUSTEE_IS_NAME,
+					MultipleTrusteeOperation = MultipleTrusteeOperation.NO_MULTIPLE_TRUSTEE,
+					TrusteeForm = TrusteeForm.TRUSTEE_IS_SID,
 					TrusteeType = TrusteeType.TRUSTEE_IS_USER,
-					PtstrName = Marshal.StringToHGlobalAuto(userName),
+					PtstrName = pSid,
 				},
 			};
 
-			uint result = SetEntriesInAcl(1, [explicitAccess], IntPtr.Zero, out pNewAcl);
+			// Merge our Access rules with the existing old process DACL
+			result = SetEntriesInAcl(1, [explicitAccess], pOldDacl, out pNewAcl);
 			if (result != 0)
 				throw new Win32Exception((int)result, "Failed to build new ACL.");
 
@@ -904,6 +931,12 @@ internal static partial class NativeFunctions
 		}
 		finally
 		{
+			if (pSid != IntPtr.Zero)
+				Marshal.FreeHGlobal(pSid);
+
+			if (pSecurityDescriptor != IntPtr.Zero)
+				LocalFree(pSecurityDescriptor);
+
 			// SetEntriesInAcl allocates memory that must be freed with LocalFree
 			if (pNewAcl != IntPtr.Zero)
 				LocalFree(pNewAcl);
@@ -1871,6 +1904,20 @@ internal static partial class NativeFunctions
 		[MarshalAs(UnmanagedType.LPArray), In] ExplicitAccess[] pListOfExplicitEntries,
 		IntPtr OldAcl,
 		out IntPtr NewAcl);
+
+	/// <summary>
+	/// The GetSecurityInfo function retrieves a copy of the security descriptor for an object specified by a handle.
+	/// </summary>
+	[LibraryImport("advapi32.dll", SetLastError = true)]
+	public static partial uint GetSecurityInfo(
+		IntPtr handle,
+		uint objectType,
+		uint securityInfo,
+		IntPtr ppsidOwner,
+		IntPtr ppsidGroup,
+		out IntPtr ppDacl,
+		IntPtr ppSacl,
+		out IntPtr ppSecurityDescriptor);
 
 	[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto, Pack = 0)]
 	public struct ExplicitAccess
