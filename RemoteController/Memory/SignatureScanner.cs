@@ -42,28 +42,40 @@ public sealed unsafe class SignatureScanner
 	/// </summary>
 	/// <param name="module">The process to be used for scanning.</param>
 	public SignatureScanner(ProcessModule module, IProcessMemoryReader memoryReader)
+		: this(module?.BaseAddress ?? 0, module?.FileName ?? string.Empty, memoryReader)
 	{
-		Debug.Assert(module != null, "Process module cannot be null.");
 		this.Module = module;
-		this.moduleBaseAddress = module.BaseAddress;
+	}
+
+	/// <summary>
+	/// Initializes a new instance of the <see cref="SignatureScanner"/> class.
+	/// </summary>
+	/// <param name="moduleBaseAddress">The base address of the module.</param>
+	/// <param name="moduleFilePath">The full path on disk to the module executable.</param>
+	/// <param name="memoryReader">The process memory reader.</param>
+	public SignatureScanner(nint moduleBaseAddress, string moduleFilePath, IProcessMemoryReader memoryReader)
+	{
+		Debug.Assert(moduleBaseAddress != 0, "A valid module base address must be provided");
+		Debug.Assert(!string.IsNullOrEmpty(moduleFilePath), "A valid module file path must be provided");
+
+		this.moduleBaseAddress = moduleBaseAddress;
 		this.memoryReader = memoryReader;
 
-		string? fileName = module.FileName;
-		if (string.IsNullOrEmpty(fileName))
+		if (string.IsNullOrEmpty(moduleFilePath))
 			throw new ArgumentException("Unable to obtain module path.");
 
 		// Open the file on disk to map it
-		this.file = MemoryMappedFile.CreateFromFile(fileName, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+		this.file = MemoryMappedFile.CreateFromFile(moduleFilePath, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
 
 		// Limit the search space to .text section.
-		this.SetupSearchSpace(module, out SectionInfo textSection, out SectionInfo dataSection);
+		this.SetupSearchSpace(moduleBaseAddress, out SectionInfo textSection, out SectionInfo dataSection);
 		this.textSectionVirtualAddress = textSection.VirtualAddress;
 		this.dataSectionVirtualAddress = dataSection.VirtualAddress;
 
 		this.textSectionAccessor = this.file.CreateViewAccessor(textSection.Offset, textSection.Size, MemoryMappedFileAccess.Read);
 		this.dataSectionAccessor = this.file.CreateViewAccessor(dataSection.Offset, dataSection.Size, MemoryMappedFileAccess.Read);
 
-		Log.Information($"Signature Scanner (MMF) Created: {module.ModuleName}");
+		Log.Information($"Signature Scanner (MMF) Created: {Path.GetFileName(moduleFilePath)}");
 		Log.Information($"Text Section: Offset=0x{textSection.Offset:X}, Virtual Address=0x{textSection.VirtualAddress:X}, Size=0x{textSection.Size:X}");
 		Log.Information($"Data Section: Offset=0x{dataSection.Offset:X}, Virtual Address=0x{dataSection.VirtualAddress:X}, Size=0x{dataSection.Size:X}");
 
@@ -74,7 +86,10 @@ public sealed unsafe class SignatureScanner
 	}
 
 	/// <summary>Gets the process module the scanner is attached to.</summary>
-	public ProcessModule Module { get; }
+	/// <remarks>
+	/// Note that using the <see cref="SignatureScanner(nint, string, IProcessMemoryReader)"/> constructor will result in this property being null.
+	/// </remarks>
+	public ProcessModule? Module { get; }
 
 	/// <summary>
 	/// Resolve a RVA address.
@@ -318,12 +333,10 @@ public sealed unsafe class SignatureScanner
 		return -1;
 	}
 
-	private void SetupSearchSpace(ProcessModule module, out SectionInfo textSection, out SectionInfo dataSection)
+	private void SetupSearchSpace(IntPtr baseAddress, out SectionInfo textSection, out SectionInfo dataSection)
 	{
 		textSection = default;
 		dataSection = default;
-
-		IntPtr baseAddress = module.BaseAddress;
 
 		// We don't want to read all of IMAGE_DOS_HEADER or IMAGE_NT_HEADER stuff so we cheat here.
 		int ntNewOffset = this.memoryReader.ReadInt32(baseAddress, 0x3C);
