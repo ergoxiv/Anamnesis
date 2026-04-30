@@ -31,7 +31,7 @@ using System.Windows.Navigation;
 using static Anamnesis.Actor.Utilities.DyeUtility;
 
 /// <summary>
-/// Interaction logic for AppearancePage.xaml.
+/// Interaction logic for CharacterPage.xaml.
 /// </summary>
 [AddINotifyPropertyChangedInterface]
 public partial class CharacterPage : UserControl, INotifyPropertyChanged

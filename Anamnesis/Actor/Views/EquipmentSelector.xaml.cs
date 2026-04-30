@@ -50,7 +50,7 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 
 		this.JobFilterText.Text = s_classFilter.Describe();
 
-		HotkeyService.RegisterHotkeyHandler("AppearancePage.ClearEquipment", this.ClearSlot);
+		HotkeyService.RegisterHotkeyHandler("CharacterPage.ClearEquipment", this.ClearSlot);
 
 		GposeService.GposeStateChanged += this.OnGposeStateChanged;
 		this.OnGposeStateChanged(GposeService.InstanceOrNull?.IsGpose ?? false);
@@ -160,7 +160,7 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 	{
 		base.OnClosed();
 
-		HotkeyService.ClearHotkeyHandler("AppearancePage.ClearEquipment", this);
+		HotkeyService.ClearHotkeyHandler("CharacterPage.ClearEquipment", this);
 		GposeService.GposeStateChanged -= this.OnGposeStateChanged;
 	}
 

@@ -19,7 +19,7 @@ using System.Windows.Threading;
 using static Anamnesis.Memory.ActorCustomizeMemory;
 
 /// <summary>
-/// Interaction logic for AppearancePage.xaml.
+/// Interaction logic for CustomizeEditor.xaml.
 /// </summary>
 [AddINotifyPropertyChangedInterface]
 public partial class CustomizeEditor : UserControl

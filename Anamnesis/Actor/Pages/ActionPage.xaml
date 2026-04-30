@@ -447,7 +447,10 @@
                         <Button Style="{StaticResource TransparentButton}" Click="OnResumeAll">
                             <XivToolsWpf:IconBlock Icon="Play"/>
                             <Button.ToolTip>
-                                <ana:HotkeyPrompt Function="ActionPage.ResumeAll" />
+                                <StackPanel>
+                                    <XivToolsWpf:TextBlock Key="Hotkey_ResumeAll" />
+                                    <ana:HotkeyPrompt Function="ActionPage.ResumeAll" />
+                                </StackPanel>
                             </Button.ToolTip>
                         </Button>
 
@@ -456,7 +459,10 @@
                         <Button Style="{StaticResource TransparentButton}" Click="OnPauseAll">
                             <XivToolsWpf:IconBlock Icon="Pause"/>
                             <Button.ToolTip>
-                                <ana:HotkeyPrompt Function="ActionPage.PauseAll" />
+                                <StackPanel>
+                                    <XivToolsWpf:TextBlock Key="Hotkey_PauseAll" />
+                                    <ana:HotkeyPrompt Function="ActionPage.PauseAll" />
+                                </StackPanel>
                             </Button.ToolTip>
                         </Button>
                     </StackPanel>
