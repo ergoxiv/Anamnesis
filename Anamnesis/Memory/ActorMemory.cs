@@ -29,9 +29,6 @@ public class ActorMemory : GameObjectMemory, IDisposable
 		new AnamnesisActorRefresher(),
 	];
 
-	private static readonly Lock s_hookLock = new();
-	private static HookHandle? s_isWandererHook = null;
-
 	private readonly System.Timers.Timer refreshDebounceTimer;
 	private readonly FuncQueue backupQueue;
 	private readonly SemaphoreSlim snapshotSemaphore = new(1, 1);
@@ -42,11 +39,6 @@ public class ActorMemory : GameObjectMemory, IDisposable
 
 	public ActorMemory()
 	{
-		lock (s_hookLock)
-		{
-			s_isWandererHook ??= ControllerService.Instance.RegisterWrapper<Character.IsWanderer>();
-		}
-
 		this.backupQueue = new(this.BackupAsync, 250);
 
 		this.PropertyChanged += this.HandlePropertyChanged;
@@ -318,19 +310,6 @@ public class ActorMemory : GameObjectMemory, IDisposable
 	{
 		this.OnPropertyChanged(nameof(this.CanRefresh));
 		this.OnPropertyChanged(nameof(this.RefreshBlockReason));
-	}
-
-	public bool IsWanderer()
-	{
-		try
-		{
-			return ControllerService.Instance.InvokeHook<bool>(s_isWandererHook!, args: this.Address) ?? false;
-		}
-		catch
-		{
-			Log.Verbose($"Failed to invoke 'IsWanderer' hook for actor at address 0x{this.Address:X}");
-			return false;
-		}
 	}
 
 	internal HumanDrawData BuildDrawData()
