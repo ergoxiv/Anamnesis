@@ -30,10 +30,6 @@ public static class Character
 	[FunctionBind("E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9 74 33 45 33 C0")]
 	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
 	public delegate byte EnableDraw(nint objPtr);
-
-	[FunctionBind("E8 ?? ?? ?? ?? 84 C0 8B CF")]
-	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
-	public delegate bool IsWanderer(nint charPtr);
 }
 
 public static class GameConfigEntry

@@ -81,7 +81,7 @@
 						<Button.ToolTip>
 							<StackPanel>
 								<XivToolsWpf:TextBlock Key="Character_Equipment_Clear"/>
-								<ana:HotkeyPrompt Function="AppearancePage.ClearEquipment"/>
+								<ana:HotkeyPrompt Function="CharacterPage.ClearEquipment"/>
 							</StackPanel>
 						</Button.ToolTip>
 

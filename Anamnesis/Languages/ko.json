@@ -850,7 +850,7 @@
   "Hotkey_RotateXMinusSlow": "X- 느리게 회전",
   "Hotkey_RotateYPlusSlow": "Y+ 느리게 회전",
   "Hotkey_RotateYMinusSlow": "Y- 느리게 회전",
-  "HotkeyCategory_AppearancePage": "외형",
+  "HotkeyCategory_CharacterPage": "외형",
   "Hotkey_ClearEquipment": "장비 비우기",
   "HotkeyCategory_TargetService": "액터",
   "Hotkey_SelectPinned1": "액터 1 선택",

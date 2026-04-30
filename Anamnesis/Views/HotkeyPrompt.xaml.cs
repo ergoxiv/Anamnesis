@@ -8,6 +8,7 @@ using Anamnesis.Keyboard;
 using Anamnesis.Memory.Exceptions;
 using Serilog;
 using System.Text;
+using System.Windows;
 using System.Windows.Input;
 using XivToolsWpf.DependencyProperties;
 
@@ -18,18 +19,40 @@ public partial class HotkeyPrompt : System.Windows.Controls.TextBlock
 {
 	public static readonly IBind<string> FunctionDp = Binder.Register<string, HotkeyPrompt>(nameof(Function), OnKeyChanged, BindMode.OneWay);
 
+	private bool isInternalSet = false;
+
 	public HotkeyPrompt()
 	{
 		this.InitializeComponent();
 		this.LoadString();
 	}
 
-	public string? Function { get; set; }
+	public string Function
+	{
+		get => FunctionDp.Get(this);
+		set
+		{
+			if (FunctionDp.Get(this) == value)
+				return;
+
+			this.isInternalSet = true;
+			FunctionDp.Set(this, value);
+			this.isInternalSet = false;
+		}
+	}
 
 	public static void OnKeyChanged(HotkeyPrompt sender, string val)
 	{
+		if (sender.isInternalSet)
+			return;
+
 		sender.Function = val;
 		sender.LoadString();
+	}
+
+	private void OnLoaded(object sender, RoutedEventArgs e)
+	{
+		this.LoadString();
 	}
 
 	private void LoadString()

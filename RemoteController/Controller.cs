@@ -12,7 +12,6 @@ using Serilog;
 using SharedMemoryIPC;
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -30,6 +29,7 @@ public class Controller
 	private const int IPC_FAST_FAIL_TIMEOUT_MS = 16;
 	private const int BATCH_INVOKE_BUFFER_STARTSIZE = 1024;
 	private const int STACKALLOC_THRESHOLD = 256;
+	private const int MAX_PATH_LENGTH = 32768; // Windows maximum path length
 
 	private const string FASM_RESOURCE_NAME = "FASMX64";
 	private const string FASM_RESOURCE_FILENAME = $"{FASM_RESOURCE_NAME}.dll";
@@ -293,13 +293,43 @@ public class Controller
 				s_dllImportResolverSet = true;
 			}
 
-			Process currentProcess = Process.GetCurrentProcess();
-			if (currentProcess.MainModule == null)
+			if (!NativeFunctions.GetModuleHandleEx(
+				(uint)NativeFunctions.GetModuleFlag.GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				IntPtr.Zero,
+				out IntPtr hMainModule))
 			{
-				Log.Error("Failed to get main module of the current process.");
+				Log.Error("Failed to get main module handle of the current process.");
 				return;
 			}
-			Scanner = new SignatureScanner(currentProcess.MainModule, MemoryReader);
+
+			string? mainModulePath = null;
+			unsafe
+			{
+				char[] buffer = ArrayPool<char>.Shared.Rent(MAX_PATH_LENGTH);
+				try
+				{
+					fixed (char* pBuffer = buffer)
+					{
+						uint length = NativeFunctions.GetModuleFileName(hMainModule, pBuffer, (uint)MAX_PATH_LENGTH);
+						if (length > 0)
+						{
+							mainModulePath = new string(buffer.AsSpan(0, (int)length));
+						}
+					}
+				}
+				finally
+				{
+					ArrayPool<char>.Shared.Return(buffer);
+				}
+			}
+
+			if (string.IsNullOrEmpty(mainModulePath))
+			{
+				Log.Error("Failed to get main module path.");
+				return;
+			}
+
+			Scanner = new SignatureScanner(hMainModule, mainModulePath, MemoryReader);
 			SigResolver = new SignatureResolver(Scanner, MemoryReader);
 
 			Log.Debug("Creating IPC endpoints...");
