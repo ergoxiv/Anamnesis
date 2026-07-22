@@ -1,0 +1,77 @@
+name: Update Channels Manifest on Release
+
+permissions:
+  contents: write
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  update-manifest:
+    name: Update Manifest
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      # Done after a release is published to ensure that users only get the update prompt after the draft release is out
+      - name: Update channels manifest versioning
+        run: |
+          $tag = "${{ github.event.release.tag_name }}" # e.g., "v2.1.0" or "v2.2.0-experimental"
+          Write-Host "Processing release tag: $tag"
+
+          $rawVer = $tag -replace '^v', ''
+
+          # Extract channel and raw version
+          if ($rawVer -contains "-") {
+            $parts = $rawVer.Split('-')
+            $version = $parts[0]
+            $channelId = $parts[1]
+          } else {
+            $version = $rawVer
+            $channelId = "stable"
+          }
+
+          $manifestPath = "./channels.json"
+          if (-not (Test-Path $manifestPath)) {
+            Write-Error "channels.json not found."
+            exit 1
+          }
+
+          $manifest = Get-Content $manifestPath | ConvertFrom-Json
+          if (-not $manifest.channels.PSObject.Properties[$channelId]) {
+            Write-Error "Channel '$channelId' not found in channels manifest file."
+            exit 1
+          }
+
+          $currentVersion = $manifest.channels.$channelId.version
+          if ($currentVersion -eq $version) {
+            Write-Host "Channel '$channelId' is already at version $version. Skipping commit."
+            exit 0
+          }
+
+          Write-Host "Updating channel '$channelId' version: $currentVersion -> $version"
+          $manifest.channels.$channelId.version = $version
+
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content $manifestPath
+
+          # Commit updated manifest
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add $manifestPath
+
+          if (git diff --cached --quiet) {
+            Write-Host "No changes detected. Skipping commit."
+            exit 0
+          }
+
+          git commit -m "chore: update channel '$channelId' to version $version"
+          git push origin HEAD:${{ github.event.release.target_commitish }}

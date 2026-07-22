@@ -10,16 +10,20 @@ on:
     inputs:
       channel:
         type: string
-        description: 'Release channel (e.g., "stable", "beta", "alpha")'
+        description: 'Release channel (e.g., "stable")'
         required: true
         default: 'stable'
       version:
         type: string
-        description: 'Override release version. If left blank, the version field from the selected channel is used'
+        description: |
+          Override release version.
+          If left blank, the version field from the selected channel is used
         required: false
       validated_game_version:
         type: string
-        description: 'Override validated game version. If left blank, the validated game version field from the selected channel is used'
+        description: |
+          Override validated game version.
+          If left blank, the validated game version field from the selected channel is used
         required: false
 
 concurrency:
@@ -199,38 +203,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update channels manifest
+      - name: Update validated game version in channels manifest
         run: |
           $manifestPath = "./channels.json"
           $manifest = Get-Content $manifestPath | ConvertFrom-Json
           $channelId = "${{ github.event.inputs.channel }}"
 
-          $currentVersion = $manifest.channels.$channelId.version
           $currentGameVer = $manifest.channels.$channelId.validated_game_version
-
-          $newVersion = "${{ env.RELEASE_VERSION }}"
           $newGameVer = "${{ env.GAME_VERSION }}"
 
-          $versionChanged = $currentVersion -ne $newVersion
-          $gameVerChanged = $currentGameVer -ne $newGameVer
-
-          if (-not $versionChanged -and -not $gameVerChanged) {
-            Write-Host "No changes detected for channel '$channelId' in channels.json. Skipping commit."
+          if ($currentGameVer -eq $newGameVer) {
+            Write-Host "Validated game version for channel '$channelId' is already '$newGameVer'. Skipping commit."
             exit 0
           }
 
-          # Update the relevant manifest fields
-          if ($versionChanged) {
-            Write-Host "Updating channel '$channelId' version: $currentVersion -> $newVersion"
-            $manifest.channels.$channelId.version = $newVersion
-          }
+          Write-Host "Updating channel '$channelId' validated_game_version: $currentGameVer -> $newGameVer"
+          $manifest.channels.$channelId.validated_game_version = $newGameVer
 
-          if ($gameVerChanged) {
-            Write-Host "Updating channel '$channelId' validated_game_version: $currentGameVer -> $newGameVer"
-            $manifest.channels.$channelId.validated_game_version = $newGameVer
-          }
-
-          # Save back the updated manifest state
+          # Save updated manifest
           $manifest | ConvertTo-Json -Depth 10 | Set-Content $manifestPath
 
           # Commit updated manifest
@@ -243,5 +233,5 @@ jobs:
             exit 0
           }
 
-          git commit -m "chore: update channel '$channelId' (Version: $newVersion, Game Version: $newGameVer)"
+          git commit -m "chore: update channel '$channelId' validated game version to $newGameVer"
           git push origin HEAD:${{ github.ref_name }}
