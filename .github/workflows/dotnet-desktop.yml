@@ -15,16 +15,8 @@ on:
         default: 'stable'
       version:
         type: string
-        description: |
-          Override release version.
-          If left blank, the version field from the selected channel is used
-        required: false
-      validated_game_version:
-        type: string
-        description: |
-          Override validated game version.
-          If left blank, the validated game version field from the selected channel is used
-        required: false
+        description: 'Semantic version (e.g., "1.1.0")'
+        required: true
 
 concurrency:
   group: publish-${{ github.ref_name }}
@@ -49,8 +41,8 @@ jobs:
       - name: Resolve channel input settings
         id: resolve_channel
         run: |
-          # Process channel input
-          $channelId = "${{ github.event.inputs.channel }}"
+         # Process channel input
+          $channelId = "${{ github.event.inputs.channel }}".Trim()
           if (-not (Test-Path "./channels.json")) {
             Write-Error "Error: channels.json manifest file not found in root directory."
             exit 1
@@ -65,12 +57,12 @@ jobs:
           $channelData = $manifest.channels.$channelId
 
           # Process input version
-          $inputVer = "${{ github.event.inputs.version }}"
-          if (-not [string]::IsNullOrWhiteSpace($inputVer)) {
-            $targetVer = $inputVer -replace '^v', ''
-          } else {
-            $targetVer = $channelData.version
+          $inputVer = "${{ github.event.inputs.version }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($inputVer)) {
+            Write-Error "Error: Version parameter is required."
+            exit 1
           }
+          $targetVer = $inputVer -replace '^v', ''
 
           # Construct tag name according to channel
           if ($channelId -eq "stable") {
@@ -81,30 +73,17 @@ jobs:
             $isPreRelease = "true"
           }
 
-          # Process input game version
-          $gameVer = "${{ github.event.inputs.validated_game_version }}"
-          if ([string]::IsNullOrWhiteSpace($gameVer)) {
-            $gameVer = $channelData.validated_game_version
-          } else {
-            if ($gameVer -notmatch '^\d{4}\.\d{2}\.\d{2}\.\d{4}\.\d{4}$') {
-              Write-Error "Invalid game version format '$gameVer'. Expected format YYYY.MM.DD.0000.0000"
-              exit 1
-            }
-          }
-
           # Process VPK channel name
           $vpkChannel = if ($channelId.StartsWith("win-")) { $channelId } else { "win-$channelId" }
 
           # Export values as environment variables for later steps
           echo "RELEASE_VERSION=$targetVer" >> $env:GITHUB_ENV
           echo "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
-          echo "GAME_VERSION=$gameVer" >> $env:GITHUB_ENV
           echo "IS_PRERELEASE=$isPreRelease" >> $env:GITHUB_ENV
           echo "VPK_CHANNEL=$vpkChannel" >> $env:GITHUB_ENV
 
           Write-Host "Target Version: $targetVer"
           Write-Host "Release Tag: $tag"
-          Write-Host "Game Version: $gameVer"
           Write-Host "Is Pre-release: $isPreRelease"
 
       - name: Fetch framework version from local global file
@@ -197,61 +176,29 @@ jobs:
 
           Compress-Archive -Path "./Migration/*" -DestinationPath "./Migration.zip" -Force
 
-      - name: Create draft release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_TAG }}
-          draft: true
-          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
-          artifacts: "Migration.zip,./Releases/*"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Velopack artifacts to GitHub Release
+      - name: Create draft release & upload Velopack artifacts
         id: upload_vpk
         run: |
-          vpk upload github `
-            --repoUrl "https://github.com/${{ github.repository }}" `
-            --releaseName "${{ env.RELEASE_TAG }}" `
-            --channel "${{ env.VPK_CHANNEL }}" `
-            --token "${{ secrets.GITHUB_TOKEN }}" `
-            --merge
+          $vpkArgs = @(
+            "upload", "github",
+            "--repoUrl", "https://github.com/${{ github.repository }}",
+            "--releaseName", "${{ env.RELEASE_TAG }}",
+            "--tag", "${{ env.RELEASE_TAG }}",
+            "--channel", "${{ env.VPK_CHANNEL }}",
+            "--token", "${{ secrets.GITHUB_TOKEN }}",
+            "--targetCommitish", "${{ github.sha }}",
+            "--outputDir", "./Releases"
+          )
 
-      - name: Update validated game version in channels manifest
+          if ("${{ env.IS_PRERELEASE }}" -eq "true") {
+            $vpkArgs += "--pre"
+          }
+
+          vpk @vpkArgs
+
+      - name: Append migration archive to draft release
+        id: upload_migration
         run: |
-          $manifestPath = "./channels.json"
-          $manifest = Get-Content $manifestPath | ConvertFrom-Json
-          $channelId = "${{ github.event.inputs.channel }}"
-
-          # Update the channels manifest on the master branch as thats what the application checks for updates against
-          git fetch origin master
-          git checkout master
-          git pull origin master
-
-          $currentGameVer = $manifest.channels.$channelId.validated_game_version
-          $newGameVer = "${{ env.GAME_VERSION }}"
-
-          if ($currentGameVer -eq $newGameVer) {
-            Write-Host "Validated game version for channel '$channelId' is already '$newGameVer'. Skipping commit."
-            exit 0
-          }
-
-          Write-Host "Updating channel '$channelId' validated_game_version: $currentGameVer -> $newGameVer"
-          $manifest.channels.$channelId.validated_game_version = $newGameVer
-
-          # Save updated manifest
-          $manifest | ConvertTo-Json -Depth 10 | Set-Content $manifestPath
-
-          # Commit updated manifest
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add $manifestPath
-
-          if (git diff --cached --quiet) {
-            Write-Host "No changes detected in version control. Skipping commit."
-            exit 0
-          }
-
-          git commit -m "chore: update channel '$channelId' validated game version to $newGameVer"
-          git push origin master
+          gh release upload "${{ env.RELEASE_TAG }}" "./Migration.zip" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

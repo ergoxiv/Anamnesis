@@ -398,9 +398,6 @@ public partial class UpdateService : ServiceBase<UpdateService>
 		[JsonPropertyName("name")]
 		public string Name { get; set; } = string.Empty;
 
-		[JsonPropertyName("version")]
-		public string Version { get; set; } = string.Empty;
-
 		[JsonPropertyName("validated_game_version")]
 		public string ValidatedGameVersion { get; set; } = string.Empty;
 
