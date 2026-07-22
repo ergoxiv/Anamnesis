@@ -141,14 +141,6 @@
       <Generator>ResXFileCodeGenerator</Generator>
     </EmbeddedResource>
   </ItemGroup>
-  <ItemGroup>
-    <None Update="Download dotNet desktop runtime.URL">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Install .NET Desktop Runtime.bat">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
   <ProjectExtensions>
     <VisualStudio>
       <UserProperties languages_4en_1json__JsonSchema="Warning_MinionGposeTitle" />
