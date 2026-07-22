@@ -20,6 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: master # Update manifest on master branch regardless of which branch the release was created from
           persist-credentials: true
 
       # Done after a release is published to ensure that users only get the update prompt after the draft release is out
@@ -74,4 +75,4 @@ jobs:
           }
 
           git commit -m "chore: update channel '$channelId' to version $version"
-          git push origin HEAD:${{ github.event.release.target_commitish }}
+          git push origin HEAD:master

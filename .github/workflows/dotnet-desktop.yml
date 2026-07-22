@@ -208,11 +208,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Upload Velopack artifacts to GitHub Release
+        id: upload_vpk
+        run: |
+          vpk upload github `
+            --repoUrl "https://github.com/${{ github.repository }}" `
+            --releaseName "${{ env.RELEASE_TAG }}" `
+            --channel "${{ env.VPK_CHANNEL }}" `
+            --token "${{ secrets.GITHUB_TOKEN }}" `
+            --merge
+
       - name: Update validated game version in channels manifest
         run: |
           $manifestPath = "./channels.json"
           $manifest = Get-Content $manifestPath | ConvertFrom-Json
           $channelId = "${{ github.event.inputs.channel }}"
+
+          # Update the channels manifest on the master branch as thats what the application checks for updates against
+          git fetch origin master
+          git checkout master
+          git pull origin master
 
           $currentGameVer = $manifest.channels.$channelId.validated_game_version
           $newGameVer = "${{ env.GAME_VERSION }}"
@@ -239,4 +254,4 @@ jobs:
           }
 
           git commit -m "chore: update channel '$channelId' validated game version to $newGameVer"
-          git push origin HEAD:${{ github.ref_name }}
+          git push origin master
