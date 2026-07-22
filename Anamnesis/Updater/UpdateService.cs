@@ -49,6 +49,16 @@ public partial class UpdateService : ServiceBase<UpdateService>
 
 		bool skipTimeCheck = false;
 
+		try
+		{
+			await this.FetchChannelsManifest();
+		}
+		catch (Exception ex)
+		{
+			Log.Warning(ex, "Failed to fetch channels manifest during initialization.");
+			return;
+		}
+
 		// Determine if this is a dev build
 		if (VersionInfo.IsDevelopmentBuild)
 		{
@@ -97,13 +107,12 @@ public partial class UpdateService : ServiceBase<UpdateService>
 				Directory.Delete(UpdateTempDir, true);
 			}
 
-			if (!this.httpClient.DefaultRequestHeaders.Contains("User-Agent"))
-				this.httpClient.DefaultRequestHeaders.Add("User-Agent", "AutoUpdater");
-
-			string manifestJson = await this.httpClient.GetStringAsync(MANIFEST_RAW_URL);
-			GlobalManifest = JsonSerializer.Deserialize<ChannelsManifest>(manifestJson);
-			if (GlobalManifest?.Channels == null)
-				throw new Exception("Failed to deserialize channels manifest");
+			await this.FetchChannelsManifest();
+			if (GlobalManifest == null)
+			{
+				Log.Warning("Channels manifest is empty after retrieval. Aborting update check.");
+				return false;
+			}
 
 			string activeChannelId = SettingsService.Current.UpdateChannel ?? string.Empty;
 			if (string.IsNullOrEmpty(activeChannelId))
@@ -280,6 +289,21 @@ public partial class UpdateService : ServiceBase<UpdateService>
 			return false;
 
 		return string.Equals(channelData.ValidatedGameVersion, VersionInfo.ValidatedGameVersion, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private async Task<ChannelsManifest> FetchChannelsManifest()
+	{
+		if (!this.httpClient.DefaultRequestHeaders.Contains("User-Agent"))
+			this.httpClient.DefaultRequestHeaders.Add("User-Agent", "AutoUpdater");
+
+		string manifestJson = await this.httpClient.GetStringAsync(MANIFEST_RAW_URL);
+		ChannelsManifest? manifest = JsonSerializer.Deserialize<ChannelsManifest>(manifestJson);
+
+		if (manifest?.Channels == null)
+			throw new Exception("Failed to deserialize channels manifest");
+
+		GlobalManifest = manifest;
+		return manifest;
 	}
 
 	private async Task<bool> PromptUpdateConfirmation(UpdateInfo updateInfo, string channelId)
