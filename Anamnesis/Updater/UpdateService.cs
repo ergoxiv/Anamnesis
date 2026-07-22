@@ -124,33 +124,42 @@ public partial class UpdateService : ServiceBase<UpdateService>
 			if (!GlobalManifest.Channels.TryGetValue(activeChannelId, out var activeChannelData))
 				throw new Exception($"Current update channel '{activeChannelId}' not found in channels manifest.");
 
-			activeChannelData = GlobalManifest.Channels[activeChannelId];
 			CurrentChannelData = activeChannelData;
-
-			string activeVelopackChannel = GetVelopackChannel(activeChannelId);
 			var githubSource = new GithubSource(GITHUB_REPO_URL, accessToken: null, prerelease: true);
-			var updateOpts = new UpdateOptions
-			{
-				ExplicitChannel = activeVelopackChannel,
-				AllowVersionDowngrade = true, // Desirable as it allows users to switch channels without being blocked by version checks
-			};
 
-			this.updateManager = new UpdateManager(githubSource, updateOpts);
-
-			if (!this.updateManager.IsInstalled)
+			if (IsChannelCompatible(activeChannelData))
 			{
-				Log.Warning("The portable application does not support automatic updates.");
+				string activeVelopackChannel = GetVelopackChannel(activeChannelId);
+				var updateOpts = new UpdateOptions
+				{
+					ExplicitChannel = activeVelopackChannel,
+					AllowVersionDowngrade = true, // Desirable as it allows users to switch channels without being blocked by version checks
+				};
+
+				this.updateManager = new UpdateManager(githubSource, updateOpts);
+
+				if (!this.updateManager.IsInstalled)
+				{
+					Log.Warning("The portable application does not support automatic updates.");
+					return false;
+				}
+
+				this.pendingUpdate = await this.updateManager.CheckForUpdatesAsync();
+				if (this.pendingUpdate != null)
+				{
+					bool update = await this.PromptUpdateConfirmation(this.pendingUpdate, activeChannelId);
+					SettingsService.Current.LastUpdateCheck = DateTimeOffset.Now;
+					SettingsService.Save();
+					return update;
+				}
+
+				// Active channel is compatible and up to date. Do not evaluate fallbacks.
+				SettingsService.Current.LastUpdateCheck = DateTimeOffset.Now;
+				SettingsService.Save();
 				return false;
 			}
 
-			this.pendingUpdate = await this.updateManager.CheckForUpdatesAsync();
-			if (this.pendingUpdate != null)
-			{
-				bool update = await this.PromptUpdateConfirmation(this.pendingUpdate, activeChannelId);
-				SettingsService.Current.LastUpdateCheck = DateTimeOffset.Now;
-				SettingsService.Save();
-				return update;
-			}
+			Log.Information($"The channel '{activeChannelId}' is not compatible with game version '{VersionInfo.ValidatedGameVersion}'. Checking fallbacks...");
 
 			var visitedChannels = new HashSet<string> { activeChannelId };
 			string? nextFallbackId = activeChannelData.Fallback;
@@ -185,9 +194,9 @@ public partial class UpdateService : ServiceBase<UpdateService>
 					{
 						await Dispatch.MainThread();
 
-						bool? acceptSwitch = await GenericDialog.ShowLocalizedAsync(
+						bool? acceptSwitch = await GenericDialog.ShowAsync(
 							LocalizationService.GetStringFormatted("Update_ChannelSwitch_FallbackAvailable_Body", activeChannelData.Name, fallbackChannelData.Name),
-							"Update_ChannelSwitch_Title",
+							LocalizationService.GetString("Update_ChannelSwitch_Title", true),
 							System.Windows.MessageBoxButton.YesNo);
 
 						if (acceptSwitch == true)
