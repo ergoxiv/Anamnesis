@@ -157,24 +157,13 @@ jobs:
           Get-ChildItem -Path './publish/*' -Recurse -Include *.pdb,*.xml -File | Remove-Item -Force
           Get-ChildItem -Path './publish/*' -Recurse -Include FASM*,Reloaded.*,AetherTools.Anamnesis.Reloaded.* -File | Remove-Item -Force
 
-      - name: Create migration archive
-        id: create_migration_archive
+      - name: Copy updater and clean up publish directory
+        id: copy_updater
         run: |
           New-Item -ItemType Directory -Path "./Migration/Updater" -Force
-          
           Copy-Item "./publish/Updater/UpdateExtractor.exe" -Destination "./Migration/Updater/"
 
-          $msiFile = Get-ChildItem -Path "./Releases/*.msi" | Select-Object -First 1
-          if (-not $msiFile) {
-            Write-Error "Velopack MSI output was not found in ./Releases"
-            exit 1
-          }
-          Copy-Item $msiFile.FullName -Destination "./Migration/Updater/"
-
-          Compress-Archive -Path "./Migration/*" -DestinationPath "./Migration.zip" -Force
-
-      - name: Remove legacy updater from publish folder
-        run: |
+          # Removed to avoid including unused files in the release package.
           Remove-Item -Path "./publish/Updater" -Recurse -Force
 
       - name: Install Velopack CLI & Build Package
@@ -195,6 +184,18 @@ jobs:
             --noPortable `
             --msi `
             -o "./Releases"
+
+      - name: Create migration archive
+        id: create_migration_archive
+        run: |
+          $msiFile = Get-ChildItem -Path "./Releases/*.msi" | Select-Object -First 1
+          if (-not $msiFile) {
+            Write-Error "Velopack MSI output was not found in ./Releases"
+            exit 1
+          }
+          Copy-Item $msiFile.FullName -Destination "./Migration/Updater/"
+
+          Compress-Archive -Path "./Migration/*" -DestinationPath "./Migration.zip" -Force
 
       - name: Create draft release
         uses: ncipollo/release-action@v1
