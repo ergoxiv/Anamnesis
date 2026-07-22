@@ -23,6 +23,6 @@ jobs:
           update_release_body: true
           request_rate: 4
           files: |
-            Migration.zip
-            *.msi
-            *.nupkg
+            Migration\.zip$
+            .*\.msi$
+            .*\.nupkg$

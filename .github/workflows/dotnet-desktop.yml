@@ -179,18 +179,18 @@ jobs:
       - name: Create migration archive
         id: create_migration_archive
         run: |
-          New-Item -ItemType Directory -Path "./Migration" -Force
+          New-Item -ItemType Directory -Path "./Migration/Updater" -Force
           
-          Copy-Item "./publish/Updater/UpdateExtractor.exe" -Destination "./Migration/"
+          Copy-Item "./publish/Updater/UpdateExtractor.exe" -Destination "./Migration/Updater/"
 
           $msiFile = Get-ChildItem -Path "./Releases/*.msi" | Select-Object -First 1
           if (-not $msiFile) {
             Write-Error "Velopack MSI output was not found in ./Releases"
             exit 1
           }
-          Copy-Item $msiFile.FullName -Destination "./Migration/"
+          Copy-Item $msiFile.FullName -Destination "./Migration/Updater/"
 
-          Compress-Archive -Path "./Migration/*" -DestinationPath "./Migration.zip"
+          Compress-Archive -Path "./Migration/*" -DestinationPath "./Migration.zip" -Force
 
       - name: Create draft release
         uses: ncipollo/release-action@v1
