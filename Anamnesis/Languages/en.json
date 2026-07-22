@@ -17,6 +17,7 @@
   "Common_Confirm": "Confirm",
   "Common_Attention": "Attention",
   "Common_Filters": "Filters",
+  "Common_Default": "Default",
 
   "ProcessSelector_AllWarning": "Selecting a process other than the DirectX 11 Final Fantasy XIV process can cause the selected process and Anamnesis to crash",
   "ProcessSelector_NotFound": "Final Fantasy XIV process (ffxiv_dx11) not found.",
@@ -875,6 +876,11 @@
   "Settings_OverrideFpsLimiter": "Override FPS limiter",
   "Settings_OverrideFpsLimiter_Tooltip": "When toggled on, Anamnesis will override the in-game FPS limiter setting to improve performance.",
   "Settings_OverrideFpsLimiterWarning": "For best posing performance, allow Anamnesis to override the game's inactive FPS limiter. This prevents slowdowns when the game window is not focused.",
+  "Settings_UpdatesHeader": "Updates",
+  "Settings_ReleaseChannel": "Version release channel",
+  "Settings_ReleaseChannelTooltip": "This setting controls how quickly you get new features. The default branch offers stable updates, while experimental or preview channels give early access to upcoming changes.",
+  "Settings_UpdatesRateLimitWarning": "Checking for updates too often can temporarily block your access to the update server. If you are experiencing issues, please try again later.",
+
   "About_Title": "About Anamnesis",
   "About_Version_Header": "Version",
   "About_OpenSource_Header": "Proudly Open Source",
