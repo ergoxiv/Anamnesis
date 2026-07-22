@@ -22,7 +22,7 @@ public static class VersionInfo
 	/// Application version.
 	/// </summary>
 	/// <remarks>
-	/// [!] Do not manually update this field. It is automatically updated
+	/// [!] Do NOT manually update this field. It is automatically updated
 	/// in the application bootstrapping process from the Velopack installation.
 	///
 	/// Format: [Major].[Minor].[Build].0

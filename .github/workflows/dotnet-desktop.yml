@@ -7,6 +7,24 @@ permissions:
 
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        type: string
+        description: 'Release channel (e.g., "stable", "beta", "alpha")'
+        required: true
+        default: 'stable'
+      version:
+        type: string
+        description: 'Override release version. If left blank, the version field from the selected channel is used'
+        required: false
+      validated_game_version:
+        type: string
+        description: 'Override validated game version. If left blank, the validated game version field from the selected channel is used'
+        required: false
+
+concurrency:
+  group: publish-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -17,7 +35,6 @@ jobs:
         shell: pwsh
 
     steps:
-      # 1. Checkout repo + all submodules
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
@@ -25,68 +42,206 @@ jobs:
           submodules: recursive
           persist-credentials: true
 
-      # 2. Install .NET SDK
+      - name: Resolve channel input settings
+        id: resolve_channel
+        run: |
+          # Process channel input
+          $channelId = "${{ github.event.inputs.channel }}"
+          if (-not (Test-Path "./channels.json")) {
+            Write-Error "Error: channels.json manifest file not found in root directory."
+            exit 1
+          }
+
+          $manifest = Get-Content ./channels.json | ConvertFrom-Json
+          if (-not $manifest.channels.PSObject.Properties[$channelId]) {
+            Write-Error "Error: Channel '$channelId' is not defined in the channels manifest file (channels.json). Add the channel to the manifest before running this job."
+            exit 1
+          }
+
+          $channelData = $manifest.channels.$channelId
+
+          # Process input version
+          $inputVer = "${{ github.event.inputs.version }}"
+          if (-not [string]::IsNullOrWhiteSpace($inputVer)) {
+            $targetVer = $inputVer -replace '^v', ''
+          } else {
+            $targetVer = $channelData.version
+          }
+
+          # Construct tag name according to channel
+          if ($channelId -eq "stable") {
+            $tag = "v$targetVer"
+            $isPreRelease = "false"
+          } else {
+            $tag = "v$targetVer-$channelId"
+            $isPreRelease = "true"
+          }
+
+          # Process input game version
+          $gameVer = "${{ github.event.inputs.validated_game_version }}"
+          if ([string]::IsNullOrWhiteSpace($gameVer)) {
+            $gameVer = $channelData.validated_game_version
+          } else {
+            if ($gameVer -notmatch '^\d{4}\.\d{2}\.\d{2}\.\d{4}\.\d{4}$') {
+              Write-Error "Invalid game version format '$gameVer'. Expected format YYYY.MM.DD.0000.0000"
+              exit 1
+            }
+          }
+
+          # Process VPK channel name
+          $vpkChannel = if ($channelId.StartsWith("win-")) { $channelId } else { "win-$channelId" }
+
+          # Export values as environment variables for later steps
+          echo "RELEASE_VERSION=$targetVer" >> $env:GITHUB_ENV
+          echo "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          echo "GAME_VERSION=$gameVer" >> $env:GITHUB_ENV
+          echo "IS_PRERELEASE=$isPreRelease" >> $env:GITHUB_ENV
+          echo "VPK_CHANNEL=$vpkChannel" >> $env:GITHUB_ENV
+
+          Write-Host "Target Version: $targetVer"
+          Write-Host "Release Tag: $tag"
+          Write-Host "Game Version: $gameVer"
+          Write-Host "Is Pre-release: $isPreRelease"
+
+      - name: Fetch framework version from local global file
+        id: fetch_framework_version
+        run: |
+          $globalJson = Get-Content ./global.json | ConvertFrom-Json
+          $cleanVersion = $globalJson.sdk.version -replace '-.*$', ''
+          $parsedVersion = [version]$cleanVersion
+          $framework = "net$($parsedVersion.Major).$($parsedVersion.Minor)-x64-desktop"
+          
+          echo "DESKTOP_FRAMEWORK=$framework" >> $env:GITHUB_ENV
+          Write-Host "Framework Target: $framework"
+
+      - name: Check if tag already exists
+        run: |
+          git fetch --tags
+          if (git tag -l "${{ env.RELEASE_TAG }}") {
+            Write-Error "Tag ${{ env.RELEASE_TAG }} already exists. Aborting release."
+            exit 1
+          }
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: ./global.json
 
-      # 3. Publish projects
       - name: Publish Anamnesis
-        run: dotnet publish Anamnesis/Anamnesis.csproj /p:PublishProfile=".\Anamnesis\Properties\PublishProfiles\FolderProfile.pubxml" /p:DefineConstants="CI_BUILD"
+        run: dotnet publish Anamnesis/Anamnesis.csproj `
+          /p:PublishProfile=".\Anamnesis\Properties\PublishProfiles\FolderProfile.pubxml" `
+          /p:DefineConstants="CI_BUILD" `
+          /p:Version="${{ env.RELEASE_VERSION }}"
 
       - name: Publish UpdateExtractor
-        run: dotnet publish UpdateExtractor/UpdateExtractor.csproj /p:PublishProfile=".\UpdateExtractor\Properties\PublishProfiles\FolderProfile.pubxml" /p:DefineConstants="CI_BUILD"
+        run: dotnet publish UpdateExtractor/UpdateExtractor.csproj `
+          /p:PublishProfile=".\UpdateExtractor\Properties\PublishProfiles\FolderProfile.pubxml" `
+          /p:DefineConstants="CI_BUILD"
 
-      # 4. Attest Build Artifacts
-      - name: Generate artifact attestation Ana
-        uses: actions/attest-build-provenance@v2
+      - name: Generate artifact attestation Anamnesis
+        uses: actions/attest@v4
         with:
           subject-path: './publish/Anamnesis.exe'
 
       - name: Generate artifact attestation Updater
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest@v4
         with:
           subject-path: './publish/Updater/UpdateExtractor.exe'
 
-      # 5. Delete redundant files
       - name: Delete pdb and xml
         run: |
           Get-ChildItem -Path './publish/*' -Recurse -Include *.pdb,*.xml -File | Remove-Item -Force
           Get-ChildItem -Path './publish/*' -Recurse -Include FASM*,Reloaded.*,AetherTools.Anamnesis.Reloaded.* -File | Remove-Item -Force
 
-      # 6. Zip up the entire publish folder
-      - name: Create ZIP
-        run: Compress-Archive -Path './publish/*' -DestinationPath './Anamnesis.zip'
-
-      # 7. Extract version from VersionInfo.cs
-      - name: Extract version from application files
+      - name: Install Velopack CLI & Build Package
         run: |
-          $content = Get-Content ./Anamnesis/VersionInfo.cs -Raw
-          if ($content -match 'new\s*\(\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\s*\)') {
-            $version = "v$($matches[1]).$($matches[2]).$($matches[3]).$($matches[4])"
-            echo "VERSION_TAG=$version" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "Could not extract version from VersionInfo.cs"
+          dotnet tool install -g vpk
+          
+          # Download previous release metadata for delta package generation
+          vpk download github --repoUrl "https://github.com/${{ github.repository }}" --channel "${{ env.VPK_CHANNEL }}"
+
+          # Create Velopack release & MSI installer
+          vpk pack `
+            -u Anamnesis `
+            -v "${{ env.RELEASE_VERSION }}" `
+            -p "./publish" `
+            -e "Anamnesis.exe" `
+            -c "${{ env.VPK_CHANNEL }}" `
+            --framework "${{ env.DESKTOP_FRAMEWORK }}" `
+            --noPortable `
+            --msi `
+            -o "./Releases"
+
+      - name: Create migration archive
+        id: create_migration_archive
+        run: |
+          New-Item -ItemType Directory -Path "./Migration" -Force
+          
+          Copy-Item "./publish/Updater/UpdateExtractor.exe" -Destination "./Migration/"
+
+          $msiFile = Get-ChildItem -Path "./Releases/*.msi" | Select-Object -First 1
+          if (-not $msiFile) {
+            Write-Error "Velopack MSI output was not found in ./Releases"
             exit 1
           }
+          Copy-Item $msiFile.FullName -Destination "./Migration/"
 
-      # 8. Check if tag already exists
-      - name: Check if tag already exists
-        run: |
-          git fetch --tags
-          if (git tag -l "${{ env.VERSION_TAG }}") {
-            Write-Error "Tag ${{ env.VERSION_TAG }} already exists. Aborting release."
-            exit 1
-          }
+          Compress-Archive -Path "./Migration/*" -DestinationPath "./Migration.zip"
 
-      # 9. Draft a GitHub release
       - name: Create draft release
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ env.VERSION_TAG }}
-          name: ${{ env.VERSION_TAG }}
+          tag: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           draft: true
-          artifacts: "Anamnesis.zip"
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
+          artifacts: "Migration.zip,./Releases/*"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update channels manifest
+        run: |
+          $manifestPath = "./channels.json"
+          $manifest = Get-Content $manifestPath | ConvertFrom-Json
+          $channelId = "${{ github.event.inputs.channel }}"
+
+          $currentVersion = $manifest.channels.$channelId.version
+          $currentGameVer = $manifest.channels.$channelId.validated_game_version
+
+          $newVersion = "${{ env.RELEASE_VERSION }}"
+          $newGameVer = "${{ env.GAME_VERSION }}"
+
+          $versionChanged = $currentVersion -ne $newVersion
+          $gameVerChanged = $currentGameVer -ne $newGameVer
+
+          if (-not $versionChanged -and -not $gameVerChanged) {
+            Write-Host "No changes detected for channel '$channelId' in channels.json. Skipping commit."
+            exit 0
+          }
+
+          # Update the relevant manifest fields
+          if ($versionChanged) {
+            Write-Host "Updating channel '$channelId' version: $currentVersion -> $newVersion"
+            $manifest.channels.$channelId.version = $newVersion
+          }
+
+          if ($gameVerChanged) {
+            Write-Host "Updating channel '$channelId' validated_game_version: $currentGameVer -> $newGameVer"
+            $manifest.channels.$channelId.validated_game_version = $newGameVer
+          }
+
+          # Save back the updated manifest state
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content $manifestPath
+
+          # Commit updated manifest
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add $manifestPath
+
+          if (git diff --cached --quiet) {
+            Write-Host "No changes detected in version control. Skipping commit."
+            exit 0
+          }
+
+          git commit -m "chore: update channel '$channelId' (Version: $newVersion, Game Version: $newGameVer)"
+          git push origin HEAD:${{ github.ref_name }}
