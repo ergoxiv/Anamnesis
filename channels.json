@@ -1,0 +1,18 @@
+{
+  "channels": {
+    "stable": {
+        "name": "Stable",
+        "version": "2.1.0",
+        "url": "https://github.com/.../v2.1.0-stable.zip",
+        "validated_game_version": "2024.05.01.0000.0000",
+        "fallback": null
+    },
+    "experimental": {
+        "name": "Experimental",
+        "version": "2.2.0-pre1",
+        "url": "https://github.com/.../v2.2.0-pre1-exp.zip",
+        "validated_game_version": "2024.05.10.0000.0000",
+        "fallback": "stable"
+    }
+  }
+}

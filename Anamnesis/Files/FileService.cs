@@ -729,6 +729,7 @@ public class FileService : ServiceBase<FileService>
 			}
 
 			// Check version file
+			// TODO: Update this to use checksums instead of versioning to avoid constant replacements triggered by channel switching.
 			DirectoryInfo libDir = new(ParseToFilePath(StandardLibDirectory));
 			string verFile = Path.Combine(libDir.FullName, "ver.txt");
 			if (libDir.Exists && File.Exists(verFile))
