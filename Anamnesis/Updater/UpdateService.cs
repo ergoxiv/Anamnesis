@@ -25,7 +25,7 @@ using XivToolsWpf;
 
 public partial class UpdateService : ServiceBase<UpdateService>
 {
-	private const string REPOSITORY_NAME = "imchillin/Anamnesis";
+	private const string REPOSITORY_NAME = "ergoxiv/Anamnesis";
 	private const string MANIFEST_RAW_URL = $"https://raw.githubusercontent.com/{REPOSITORY_NAME}/master/channels.json";
 	private const string GITHUB_REPO_URL = $"https://github.com/{REPOSITORY_NAME}";
 
