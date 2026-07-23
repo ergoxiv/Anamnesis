@@ -151,6 +151,8 @@ public class Program
 		DeleteFileIfExists(Path.Combine(path, "Anamnesis.xml"));
 		DeleteFileIfExists(Path.Combine(path, "Version.txt"));
 		DeleteFileIfExists(Path.Combine(path, "AetherTools.Anamnesis.Reloaded.Assembler.targets"));
+		DeleteFileIfExists(Path.Combine(path, "Download dotNet desktop runtime"));
+		DeleteFileIfExists(Path.Combine(path, "Install .NET Desktop Runtime.bat"));
 		DeleteDirectoryIfExists(Path.Combine(path, "Data"));
 		DeleteDirectoryIfExists(Path.Combine(path, "Languages"));
 		DeleteDirectoryIfExists(Path.Combine(path, "Updater"));
