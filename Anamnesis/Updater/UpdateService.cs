@@ -411,6 +411,6 @@ public partial class UpdateService : ServiceBase<UpdateService>
 		public string ValidatedGameVersion { get; set; } = string.Empty;
 
 		[JsonPropertyName("fallback")]
-		public string? Fallback {  get; set; } = string.Empty;
+		public string? Fallback { get; set; } = string.Empty;
 	}
 }
