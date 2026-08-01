@@ -268,7 +268,7 @@
 				</Grid>
 			</GroupBox>
 
-			<!-- Files -->
+			<!-- Updates -->
 			<GroupBox x:Name="UpdatesGroupBox" Grid.Row="3" Margin="0, 0, 0, 10">
 				<GroupBox.Header>
 					<XivToolsWPF:Header Key="Settings_UpdatesHeader" Icon="CodeBranch"/>
@@ -290,7 +290,7 @@
 
 						<XivToolsWPF:TextBlock Grid.Column="0" Key="Settings_ReleaseChannel" Style="{StaticResource Label}"/>
 						<ComboBox Margin="6" Grid.Column="1" IsEnabled="{Binding HasReleaseChannels, Mode=OneWay}"
-								  SelectedValue="{Binding SelectedReleaseChannel}" ItemsSource="{Binding ReleaseChannels, Mode=OneTime}">
+								  SelectedValue="{Binding SelectedReleaseChannel}" ItemsSource="{Binding ReleaseChannels, Mode=OneWay}">
 							<ComboBox.ItemTemplate>
 								<DataTemplate>
 									<TextBlock Text="{Binding Display}"/>
