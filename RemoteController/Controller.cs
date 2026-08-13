@@ -1048,7 +1048,7 @@ public class Controller
 			RedrawFlags flags = (RedrawFlags)args[offset++];
 			request.Flags = flags;
 
-			if (flags.HasFlag(RedrawFlags.Weapons))
+			if (flags.HasFlag(RedrawFlags.Weapons) || flags.HasFlag(RedrawFlags.Appearance))
 			{
 				request.MainHandId = MemoryMarshal.Read<WeaponModelId>(args[offset..]);
 				offset += Unsafe.SizeOf<WeaponModelId>();
