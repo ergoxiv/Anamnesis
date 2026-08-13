@@ -1,4 +1,4 @@
-﻿// © Anamnesis.
+// © Anamnesis.
 // Licensed under the MIT license.
 
 namespace RemoteController;
@@ -1059,7 +1059,7 @@ public class Controller
 			if (flags.HasFlag(RedrawFlags.Facewear))
 			{
 				request.FacewearId = MemoryMarshal.Read<ushort>(args[offset..]);
-				offset += sizeof(uint);
+				offset += sizeof(ushort);
 			}
 
 			if (flags.HasFlag(RedrawFlags.Appearance))
