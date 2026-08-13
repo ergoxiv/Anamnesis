@@ -1,4 +1,4 @@
-﻿// © Anamnesis.
+// © Anamnesis.
 // Licensed under the MIT license.
 
 namespace Anamnesis.Actor.Views;
@@ -156,6 +156,17 @@ public partial class ItemView : UserControl
 		}
 	}
 
+	private WeaponMemory? PartnerWeapon
+	{
+		get
+		{
+			if (!this.IsWeapon || !EquipmentSelector.LinkWeaponDyes || this.Actor?.DrawData == null)
+				return null;
+
+			return (this.Slot == ItemSlots.MainHand) ? this.Actor.DrawData.OffHand : (this.Slot == ItemSlots.OffHand) ? this.Actor.DrawData.MainHand : null;
+		}
+	}
+
 	private static void OnItemModelChanged(ItemView sender, IEquipmentItemMemory? value)
 	{
 		if (sender.ItemModel != null)
@@ -278,6 +289,33 @@ public partial class ItemView : UserControl
 		}
 	}
 
+	private void SetDye(byte dyeId, bool isDye2)
+	{
+		if (this.ItemModel == null)
+			return;
+
+		if (isDye2)
+		{
+			this.ItemModel.Dye2 = dyeId;
+		}
+		else
+		{
+			this.ItemModel.Dye = dyeId;
+		}
+
+		if (this.PartnerWeapon is WeaponMemory partner)
+		{
+			if (isDye2)
+			{
+				partner.Dye2 = dyeId;
+			}
+			else
+			{
+				partner.Dye = dyeId;
+			}
+		}
+	}
+
 	private void OnDyeMouseUp(object sender, MouseButtonEventArgs e)
 	{
 		if (this.Actor?.CanRefresh != true || this.ItemModel == null)
@@ -285,7 +323,7 @@ public partial class ItemView : UserControl
 
 		if (e.ChangedButton == MouseButton.Middle && e.ButtonState == MouseButtonState.Released)
 		{
-			this.ItemModel.Dye = 0;
+			this.SetDye(0, isDye2: false);
 		}
 	}
 
@@ -296,13 +334,14 @@ public partial class ItemView : UserControl
 
 		if (e.ChangedButton == MouseButton.Middle && e.ButtonState == MouseButtonState.Released)
 		{
-			this.ItemModel.Dye2 = 0;
+			this.SetDye(0, isDye2: true);
 		}
 	}
 
 	private void OnSwapDyeChannels(object sender, RoutedEventArgs e)
 	{
 		this.ItemModel?.SwapDyeChannels();
+		this.PartnerWeapon?.SwapDyeChannels();
 	}
 
 	private void SetItem(IItem? item, bool autoOffhand = false, bool forceMain = false, bool forceOff = false)
@@ -339,6 +378,12 @@ public partial class ItemView : UserControl
 				if (ivm.HasSubModel)
 				{
 					SetModel(this.Actor?.DrawData.OffHand, ivm.SubModelSet, ivm.SubModelBase, ivm.SubModelVariant);
+
+					if (EquipmentSelector.LinkWeaponDyes && this.ItemModel != null && this.Actor?.DrawData.OffHand is WeaponMemory offWeapon)
+					{
+						offWeapon.Dye = this.ItemModel.Dye;
+						offWeapon.Dye2 = this.ItemModel.Dye2;
+					}
 				}
 				else
 				{
@@ -364,16 +409,9 @@ public partial class ItemView : UserControl
 
 		SelectorDrawer.Show<DyeSelector, IDye>(this.Dye, (v) =>
 		{
-			if (v == null)
-				return;
-
-			if (this.ItemModel is ItemMemory item)
+			if (v != null)
 			{
-				item.Dye = v.Id;
-			}
-			else if (this.ItemModel is WeaponMemory weapon)
-			{
-				weapon.Dye = v.Id;
+				this.SetDye(v.Id, isDye2: false);
 			}
 		});
 	}
@@ -385,16 +423,9 @@ public partial class ItemView : UserControl
 
 		SelectorDrawer.Show<DyeSelector, IDye>(this.Dye2, (v) =>
 		{
-			if (v == null)
-				return;
-
-			if (this.ItemModel is ItemMemory item)
+			if (v != null)
 			{
-				item.Dye2 = v.Id;
-			}
-			else if (this.ItemModel is WeaponMemory weapon)
-			{
-				weapon.Dye2 = v.Id;
+				this.SetDye(v.Id, isDye2: true);
 			}
 		});
 	}

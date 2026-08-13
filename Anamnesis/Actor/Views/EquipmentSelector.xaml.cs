@@ -1,4 +1,4 @@
-﻿// © Anamnesis.
+// © Anamnesis.
 // Licensed under the MIT license.
 
 namespace Anamnesis.Actor.Views;
@@ -36,6 +36,7 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 	private static bool s_showFilters = false;
 	private static bool s_forceMainModel = false;
 	private static bool s_forceOffModel = false;
+	private static bool s_linkDyes = true;
 	private static SortModes s_sortMode = SortModes.Row;
 
 	private readonly Memory.ActorMemory? actor;
@@ -63,6 +64,8 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 		Level,
 	}
 
+	public static bool LinkWeaponDyes => s_linkDyes;
+
 	// Suppress CA1822: The properties are used in WPF bindings. Do not set them to static.
 #pragma warning disable CA1822
 	public bool ShowFilters
@@ -75,6 +78,12 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 	{
 		get => s_autoOffhand;
 		set => s_autoOffhand = value;
+	}
+
+	public bool LinkDyes
+	{
+		get => s_linkDyes;
+		set => s_linkDyes = value;
 	}
 #pragma warning restore CA1822
 
