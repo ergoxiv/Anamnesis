@@ -219,9 +219,9 @@ public sealed class RedrawModule
 				{
 					DrawObject* mainHandDrawObj = (DrawObject*)drawData->MainHand.WeaponPtr;
 					if (isMainHandHidden)
-						mainHandDrawObj->Flags |= (byte)DrawObjectFlags.Hidden;
+						mainHandDrawObj->Flags &= (byte)~DrawObjectFlags.Visible;
 					else
-						mainHandDrawObj->Flags &= (byte)~DrawObjectFlags.Hidden;
+						mainHandDrawObj->Flags |= (byte)DrawObjectFlags.Visible;
 				}
 
 				drawData->OffHand.IsHidden = isOffHandHidden;
@@ -229,9 +229,9 @@ public sealed class RedrawModule
 				{
 					DrawObject* offHandDrawObj = (DrawObject*)drawData->OffHand.WeaponPtr;
 					if (isOffHandHidden)
-						offHandDrawObj->Flags |= (byte)DrawObjectFlags.Hidden;
+						offHandDrawObj->Flags &= (byte)~DrawObjectFlags.Visible;
 					else
-						offHandDrawObj->Flags &= (byte)~DrawObjectFlags.Hidden;
+						offHandDrawObj->Flags |= (byte)DrawObjectFlags.Visible;
 				}
 			}
 
@@ -267,6 +267,12 @@ public sealed class RedrawModule
 		bool isOffHandHidden = drawData->OffHand.IsHidden;
 
 		this.charDisableDraw.OriginalFunction(gameObjPtr);
+
+		// Clear the game object's render mode flag to allow it to be drawn.
+		// Otherwise, the subsequent EnableDraw call will re-hide the object.
+		RenderModes* renderMode = (RenderModes*)(gameObjPtr + GameObjectStruct.RENDER_FLAGS_OFFSET);
+		*renderMode &= ~RenderModes.DisableDraw;
+
 		this.charEnableDraw.OriginalFunction(gameObjPtr);
 
 		// Re-apply the hide/show flags after the redraw
@@ -275,9 +281,9 @@ public sealed class RedrawModule
 		{
 			DrawObject* mainHandDrawObj = (DrawObject*)drawData->MainHand.WeaponPtr;
 			if (isMainHandHidden)
-				mainHandDrawObj->Flags |= (byte)DrawObjectFlags.Hidden;
+				mainHandDrawObj->Flags &= (byte)~DrawObjectFlags.Visible;
 			else
-				mainHandDrawObj->Flags &= (byte)~DrawObjectFlags.Hidden;
+				mainHandDrawObj->Flags |= (byte)DrawObjectFlags.Visible;
 		}
 
 		drawData->OffHand.IsHidden = isOffHandHidden;
@@ -285,9 +291,9 @@ public sealed class RedrawModule
 		{
 			DrawObject* offHandDrawObj = (DrawObject*)drawData->OffHand.WeaponPtr;
 			if (isOffHandHidden)
-				offHandDrawObj->Flags |= (byte)DrawObjectFlags.Hidden;
+				offHandDrawObj->Flags &= (byte)~DrawObjectFlags.Visible;
 			else
-				offHandDrawObj->Flags &= (byte)~DrawObjectFlags.Hidden;
+				offHandDrawObj->Flags |= (byte)DrawObjectFlags.Visible;
 		}
 
 		return [1];

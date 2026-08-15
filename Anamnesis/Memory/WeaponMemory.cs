@@ -158,12 +158,12 @@ public class WeaponMemory : MemoryBase, IEquipmentItemMemory
 			{
 				if (value)
 				{
-					this.Model.Flags |= (byte)DrawObjectFlags.Hidden;
+					this.Model.Flags = (byte)(this.Model.Flags & ~(byte)DrawObjectFlags.Visible);
 				}
 				else
 				{
 					// When unhiding, if weapon scale is set to 0 by the user, reset it to 1 so that the weapon is visible again.
-					this.Model.Flags = (byte)(this.Model.Flags & ~(byte)DrawObjectFlags.Hidden);
+					this.Model.Flags |= (byte)DrawObjectFlags.Visible;
 					if (this.Model.Transform != null && this.Model.Transform.Scale == Vector3.Zero)
 					{
 						this.Model.Transform.Scale = Vector3.One;
