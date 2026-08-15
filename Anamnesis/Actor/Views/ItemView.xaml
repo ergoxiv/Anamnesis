@@ -151,16 +151,25 @@
 			<StackPanel Grid.Row="0" Grid.Column="1" Margin="3,0,0,0" Orientation="Horizontal" IsEnabled="{Binding Actor.CanRefresh, Mode=OneWay}">
 				<StackPanel Orientation="Horizontal" IsEnabled="{Binding CanEditItem, Mode=OneWay}">
 					<XivToolsWpf:NumberBox Width="28" Value="{Binding ItemModel.Set}" FontSize="12" FontWeight="Light"
-								ToolTip="Character_Equipment_ItemSet"
-								Visibility="{Binding IsWeapon, Converter={StaticResource B2V}, Mode=OneWay}"/>
+										   Visibility="{Binding IsWeapon, Converter={StaticResource B2V}, Mode=OneWay}">
+						<XivToolsWpf:NumberBox.ToolTip>
+							<XivToolsWpf:TextBlock Key="Character_Equipment_ItemSet"/>
+						</XivToolsWpf:NumberBox.ToolTip>
+					</XivToolsWpf:NumberBox>
 
 					<TextBlock Text="," Style="{StaticResource Label}" Margin="2, 2, 4, 0" Visibility="{Binding IsWeapon, Converter={StaticResource B2V}, Mode=OneWay}"/>
-					<XivToolsWpf:NumberBox Width="28" Value="{Binding ItemModel.Base}" FontSize="12" FontWeight="Light" 
-									   ToolTip="Character_Equipment_ItemBase"/>
+					<XivToolsWpf:NumberBox Width="28" Value="{Binding ItemModel.Base}" FontSize="12" FontWeight="Light">
+						<XivToolsWpf:NumberBox.ToolTip>
+							<XivToolsWpf:TextBlock Key="Character_Equipment_ItemBase"/>
+						</XivToolsWpf:NumberBox.ToolTip>
+					</XivToolsWpf:NumberBox>
 
 					<TextBlock Text="," Style="{StaticResource Label}" Margin="2, 2, 4, 0" />
-					<XivToolsWpf:NumberBox Width="28" Value="{Binding ItemModel.Variant}" FontSize="12" FontWeight="Light" 
-									   ToolTip="Character_Equipment_ItemVariant"/>
+					<XivToolsWpf:NumberBox Width="28" Value="{Binding ItemModel.Variant}" FontSize="12" FontWeight="Light">
+						<XivToolsWpf:NumberBox.ToolTip>
+							<XivToolsWpf:TextBlock Key="Character_Equipment_ItemVariant"/>
+						</XivToolsWpf:NumberBox.ToolTip>
+					</XivToolsWpf:NumberBox>
 				</StackPanel>
 			</StackPanel>
 
