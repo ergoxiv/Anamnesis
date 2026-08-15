@@ -216,6 +216,21 @@ public partial class ItemView : UserControl
 		}
 	}
 
+	private static bool MatchesWeapon(IItem item, WeaponMemory weaponVm, ItemSlots slot)
+	{
+		// For Off-Hand paired weapons, match against the SubModel
+		if (slot == ItemSlots.OffHand && item.HasSubModel)
+		{
+			return item.SubModelSet == weaponVm.Set
+				&& item.SubModelBase == weaponVm.Base
+				&& item.SubModelVariant == weaponVm.Variant;
+		}
+
+		return item.ModelSet == weaponVm.Set
+			&& item.ModelBase == weaponVm.Base
+			&& item.ModelVariant == weaponVm.Variant;
+	}
+
 	private void OnOpenInConsoleGamesWikiClicked(object sender, RoutedEventArgs e)
 	{
 		this.OpenItemInFanSiteUrl("https://ffxiv.consolegameswiki.com/wiki/" + this.Item?.Name.Replace(" ", "_"));
@@ -366,6 +381,9 @@ public partial class ItemView : UserControl
 
 		this.lockViewModel = true;
 
+		if (this.ItemModel != null)
+			this.ItemModel.EquippedItem = item;
+
 		if (item != null)
 		{
 			bool useSubModel = this.Slot == ItemSlots.OffHand && item.HasSubModel;
@@ -394,15 +412,21 @@ public partial class ItemView : UserControl
 				{
 					SetModel(this.Actor?.DrawData.OffHand, ivm.SubModelSet, ivm.SubModelBase, ivm.SubModelVariant);
 
-					if (EquipmentSelector.LinkWeaponDyes && this.ItemModel != null && this.Actor?.DrawData.OffHand is WeaponMemory offWeapon)
+					if (this.Actor?.DrawData.OffHand is WeaponMemory offWeapon)
 					{
-						offWeapon.Dye = this.ItemModel.Dye;
-						offWeapon.Dye2 = this.ItemModel.Dye2;
+						offWeapon.EquippedItem = ivm;
+						if (EquipmentSelector.LinkWeaponDyes && this.ItemModel != null)
+						{
+							offWeapon.Dye = this.ItemModel.Dye;
+							offWeapon.Dye2 = this.ItemModel.Dye2;
+						}
 					}
 				}
 				else
 				{
 					SetModel(this.Actor?.DrawData.OffHand, 0, 0, 0);
+					if (this.Actor?.DrawData.OffHand is WeaponMemory offWeapon)
+						offWeapon.EquippedItem = ItemUtility.NoneItem;
 				}
 			}
 
@@ -476,7 +500,15 @@ public partial class ItemView : UserControl
 
 				if (valueVm is ItemMemory itemVm)
 				{
-					IItem? item = ItemUtility.GetItem(slots, 0, itemVm.Base, itemVm.Variant, this.Actor.IsChocobo);
+					// Do not re-fetch if the selected item is the same as the current item
+					IItem? item = itemVm.EquippedItem ?? this.Item;
+					if (item == null || item.ModelBase != itemVm.Base || item.ModelVariant != itemVm.Variant)
+					{
+						item = ItemUtility.GetItem(slots, 0, itemVm.Base, itemVm.Variant, this.Actor.IsChocobo);
+					}
+
+					itemVm.EquippedItem = item;
+
 					IDye? dye;
 					IDye? dye2;
 
@@ -506,7 +538,21 @@ public partial class ItemView : UserControl
 				}
 				else if (valueVm is WeaponMemory weaponVm)
 				{
-					IItem? item = ItemUtility.GetItem(slots, weaponVm.Set, weaponVm.Base, weaponVm.Variant, this.Actor.IsChocobo);
+					// Do not re-fetch if the selected item is the same as the current item
+					IItem? item = weaponVm.EquippedItem ?? this.Item;
+
+					// Check if MainHand has a paired sub-model matching this OffHand
+					if (item == null && slots == ItemSlots.OffHand && this.Actor.DrawData.MainHand?.EquippedItem is IItem mainItem && MatchesWeapon(mainItem, weaponVm, slots))
+					{
+						item = mainItem;
+					}
+
+					if (item == null || !MatchesWeapon(item, weaponVm, slots))
+					{
+						item = ItemUtility.GetItem(slots, weaponVm.Set, weaponVm.Base, weaponVm.Variant, this.Actor.IsChocobo);
+					}
+
+					weaponVm.EquippedItem = item;
 
 					if (weaponVm.Set == 0)
 						weaponVm.Dye = 0;

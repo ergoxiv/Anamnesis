@@ -137,6 +137,8 @@ public class WeaponMemory : MemoryBase, IEquipmentItemMemory
 	[Bind(WeaponData.DRAW_OBJECT_OFFSET, BindFlags.Pointer)] public WeaponModelMemory? Model { get; set; }
 	[Bind(WeaponData.STATE_OFFSET)] public WeaponStateFlags State { get; set; }
 
+	public IItem? EquippedItem { get; set; }
+
 	[DependsOn(nameof(State))]
 	public bool WeaponHidden
 	{
