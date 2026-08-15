@@ -64,7 +64,11 @@ public partial class EquipmentSelector : EquipmentSelectorDrawer
 		Level,
 	}
 
-	public static bool LinkWeaponDyes => s_linkDyes;
+	public static bool LinkWeaponDyes
+	{
+		get => s_linkDyes;
+		set => s_linkDyes = value;
+	}
 
 	// Suppress CA1822: The properties are used in WPF bindings. Do not set them to static.
 #pragma warning disable CA1822

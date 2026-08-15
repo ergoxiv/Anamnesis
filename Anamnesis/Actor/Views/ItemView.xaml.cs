@@ -94,6 +94,16 @@ public partial class ItemView : UserControl
 	[DependsOn(nameof(IsWeapon))]
 	public bool ShowWeaponWarning => this.IsWeapon && GposeService.InstanceOrNull?.IsGpose != true;
 
+	public bool LinkWeaponDyes
+	{
+		get => EquipmentSelector.LinkWeaponDyes;
+		set
+		{
+			EquipmentSelector.LinkWeaponDyes = value;
+			this.OnPropertyChanged(nameof(this.LinkWeaponDyes));
+		}
+	}
+
 	public bool IsValidWeapon
 	{
 		get
@@ -342,6 +352,11 @@ public partial class ItemView : UserControl
 	{
 		this.ItemModel?.SwapDyeChannels();
 		this.PartnerWeapon?.SwapDyeChannels();
+	}
+
+	private void OnToggleLinkDyes(object sender, RoutedEventArgs e)
+	{
+		this.LinkWeaponDyes = !this.LinkWeaponDyes;
 	}
 
 	private void SetItem(IItem? item, bool autoOffhand = false, bool forceMain = false, bool forceOff = false)
