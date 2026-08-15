@@ -218,7 +218,7 @@ public partial class ItemView : UserControl
 
 	private static bool MatchesWeapon(IItem item, WeaponMemory weaponVm, ItemSlots slot)
 	{
-		// For Off-Hand paired weapons, match against the SubModel
+		// For off-hand paired weapons, match against the submodel
 		if (slot == ItemSlots.OffHand && item.HasSubModel)
 		{
 			return item.SubModelSet == weaponVm.Set
@@ -541,7 +541,7 @@ public partial class ItemView : UserControl
 					// Do not re-fetch if the selected item is the same as the current item
 					IItem? item = weaponVm.EquippedItem ?? this.Item;
 
-					// Check if MainHand has a paired sub-model matching this OffHand
+					// Check if the main hand already has a paired sub-model matching the off-hand
 					if (item == null && slots == ItemSlots.OffHand && this.Actor.DrawData.MainHand?.EquippedItem is IItem mainItem && MatchesWeapon(mainItem, weaponVm, slots))
 					{
 						item = mainItem;
