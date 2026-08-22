@@ -1224,9 +1224,9 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 
 				try
 				{
-						skeleton.Synchronize(s_transformSyncGroups);
-						actor.DrawData.MainHand?.Model?.Skeleton?.Synchronize(s_transformSyncGroups);
-						actor.DrawData.OffHand?.Model?.Skeleton?.Synchronize(s_transformSyncGroups);
+					skeleton.Synchronize(s_transformSyncGroups);
+					actor.DrawData.MainHand?.Model?.Skeleton?.Synchronize(s_transformSyncGroups);
+					actor.DrawData.OffHand?.Model?.Skeleton?.Synchronize(s_transformSyncGroups);
 				}
 				catch (Exception ex)
 				{

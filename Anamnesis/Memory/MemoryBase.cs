@@ -1153,10 +1153,11 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 		// Resize the bind info list that that we know total capacity
 		context.BindPath.Capacity = ancestorCount;
 
+		var args = new MemObjPropertyChangedEventArgs(propertyName, context);
 		current = this;
 		while (current != null)
 		{
-			current.PropertyChanged?.Invoke(current, new MemObjPropertyChangedEventArgs(propertyName, context));
+			current.PropertyChanged?.Invoke(current, args);
 
 			if (current.parent == null)
 				break;
