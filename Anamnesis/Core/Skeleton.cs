@@ -321,6 +321,10 @@ public class Skeleton : INotifyPropertyChanged
 			if (!GposeService.Instance.IsGpose || a.ModelObject?.Skeleton == null)
 				return;
 
+			a.ModelObject.Skeleton.Synchronize();
+			a.DrawData.MainHand?.Model?.Skeleton?.Synchronize();
+			a.DrawData.OffHand?.Model?.Skeleton?.Synchronize();
+
 			// Get all bones
 			this.AddBones(a.ModelObject.Skeleton);
 

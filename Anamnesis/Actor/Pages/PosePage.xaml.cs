@@ -1181,6 +1181,10 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 		// IMPORTANT: Do not throw in the hook detour!
 		// Sync the skeleton first, then process pending pose-related work
 
+		// Do not attempt to sync the skeleton if the actor is currently refreshing, otherwise it will time out
+		if (this.Actor != null && this.Actor.Do(actor => actor.IsRefreshing) == true)
+			return [];
+
 		// Retry skeleton creation if pending
 		if (this.pendingSkeletonRetryAttempts > 0 && this.Actor != null && (this.Skeleton == null || this.Skeleton.Bones.IsEmpty))
 		{
