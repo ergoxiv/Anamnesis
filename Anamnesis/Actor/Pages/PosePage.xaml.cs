@@ -57,6 +57,7 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 	];
 
 	private static readonly Lock s_hookLock = new();
+	private static readonly HashSet<string> s_transformSyncGroups = ["Transforms"];
 	private static HookHandle? s_renderSkeletonHook = null;
 
 	private static DirectoryInfo? s_lastLoadDir;
@@ -1223,9 +1224,9 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 
 				try
 				{
-					skeleton.Synchronize();
-					actor.DrawData.MainHand?.Model?.Skeleton?.Synchronize();
-					actor.DrawData.OffHand?.Model?.Skeleton?.Synchronize();
+						skeleton.Synchronize(s_transformSyncGroups);
+						actor.DrawData.MainHand?.Model?.Skeleton?.Synchronize(s_transformSyncGroups);
+						actor.DrawData.OffHand?.Model?.Skeleton?.Synchronize(s_transformSyncGroups);
 				}
 				catch (Exception ex)
 				{

@@ -536,8 +536,14 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 				if (pb != null && pb.Flags.HasFlagUnsafe(BindFlags.OnlyInGPose) && GposeService.InstanceOrNull?.IsGpose != true)
 					continue;
 
-				if (exclGroups != null && pb?.SyncGroup != null && exclGroups.Contains(pb.SyncGroup))
-					continue;
+				if (current != this)
+				{
+					if (exclGroups != null && pb?.SyncGroup != null && exclGroups.Contains(pb.SyncGroup))
+						continue;
+
+					if (inclGroups != null && pb?.SyncGroup != null && !inclGroups.Contains(pb.SyncGroup))
+						continue;
+				}
 
 				bool isCurrentIncluded = isParentIncluded
 					|| (inclGroups != null && pb?.SyncGroup != null && inclGroups.Contains(pb.SyncGroup));
