@@ -1,4 +1,4 @@
-﻿// © Anamnesis.
+// © Anamnesis.
 // Licensed under the MIT license.
 
 namespace Anamnesis.Memory;
@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 /// <summary>
@@ -357,6 +358,30 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 			throw new KeyNotFoundException($"Failed to find bound property with name \"{propertyName}\".");
 
 		return bind.GetAddress();
+	}
+
+	/// <summary>
+	/// Reads all bound properties of this memory object directly from an in-memory buffer slice.
+	/// </summary>
+	/// <param name="locked">The list of currently locked memory objects.</param>
+	/// <param name="bufferPtr">Pointer to the start of this object's memory in the buffer.</param>
+	/// <param name="bufferSize">Size of the buffer slice available for this object.</param>
+	public unsafe void ReadFromBuffer(List<MemoryBase> locked, byte* bufferPtr, int bufferSize)
+	{
+		if (this.disposed)
+			return;
+
+		foreach (PropertyBindInfo bind in this.Binds.Values)
+		{
+			try
+			{
+				this.ReadFromMemory(bind, locked, bufferPtr, bufferSize);
+			}
+			catch (Exception ex)
+			{
+				throw new Exception($"Failed to read {this.GetType()} - {bind.Name}", ex);
+			}
+		}
 	}
 
 	/// <summary>
@@ -752,15 +777,14 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 		this.PropagatePropertyChanged(bind.Name, change);
 	}
 
-	/// <summary>Reads a bound property value from memory.</summary>
+	/// <summary>Reads a bound property value from memory or an in-memory buffer slice.</summary>
 	/// <param name="bind">The property bind information.</param>
 	/// <param name="locked">The list of currently locked memory objects.</param>
-	protected virtual void ReadFromMemory(PropertyBindInfo bind, List<MemoryBase> locked)
+	/// <param name="bufferPtr">(Optional) Pointer to an in-memory buffer slice representing this object's memory.</param>
+	/// <param name="bufferSize">(Optional) Size of the in-memory buffer slice.</param>
+	protected unsafe virtual void ReadFromMemory(PropertyBindInfo bind, List<MemoryBase> locked, byte* bufferPtr = null, int bufferSize = 0)
 	{
-		if (this.disposed)
-			return;
-
-		if (!this.CanRead(bind))
+		if (this.disposed || !this.CanRead(bind))
 			return;
 
 		if (bind.IsWriting)
@@ -786,16 +810,25 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 
 		try
 		{
-			IntPtr bindAddress = bind.GetAddress();
-			if (bindAddress == bind.LastFailureAddress)
-				return;
+			bool canReadFromBuffer = bufferPtr != null
+				&& !bind.Flags.HasFlagUnsafe(BindFlags.Pointer)
+				&& bind.Offsets.Length == 1
+				&& bind.Offsets[0] >= 0
+				&& bind.Offsets[0] < bufferSize;
 
 			if (bind.IsMemoryBase)
 			{
+				IntPtr childAddress = canReadFromBuffer
+					? (this.Address != IntPtr.Zero ? this.Address + bind.Offsets[0] : IntPtr.Zero)
+					: bind.GetAddress();
+
+				if (childAddress == bind.LastFailureAddress)
+					return;
+
 				MemoryBase? memory = bind.Property.GetValue(this) as MemoryBase;
 				bool isNew = false;
 
-				if (bindAddress != IntPtr.Zero)
+				if (childAddress != IntPtr.Zero && childAddress.ToInt64() > 0)
 				{
 					if (memory == null)
 					{
@@ -810,10 +843,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 					}
 				}
 
-				if (memory == null)
-					return;
-
-				if (memory.Address == bindAddress)
+				if (memory == null || memory.Address == childAddress)
 					return;
 
 				// Invalidate all delayed binds if they were created prior to the memory address change
@@ -832,7 +862,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 
 				try
 				{
-					if (bindAddress == IntPtr.Zero)
+					if (childAddress == IntPtr.Zero || childAddress.ToInt64() < 0)
 					{
 						this.SetValueWithoutNotification(bind, null);
 						bind.LastValue = null;
@@ -840,7 +870,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 					}
 					else
 					{
-						memory.Address = bindAddress;
+						memory.Address = childAddress;
 						this.SetValueWithoutNotification(bind, memory);
 						bind.LastValue = memory;
 
@@ -858,15 +888,41 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 				catch (Exception ex)
 				{
 					Log.Warning(ex, $"Failed to bind to child memory: {bind.Name}");
-					bind.LastFailureAddress = bindAddress;
+					bind.LastFailureAddress = childAddress;
 				}
 			}
 			else
 			{
-				if (bindAddress == IntPtr.Zero || bindAddress.ToInt64() < 0)
-					return;
+				object? memValue;
 
-				object memValue = MemoryService.Read(bindAddress, bind.Type);
+				if (canReadFromBuffer)
+				{
+					byte* propPtr = bufferPtr + bind.Offsets[0];
+					Type type = bind.Type;
+					Type readType = type;
+
+					if (type.IsEnum)
+						readType = type.GetEnumUnderlyingType();
+					else if (type == typeof(bool))
+						readType = typeof(MemoryService.OneByteBool);
+
+					memValue = Marshal.PtrToStructure((IntPtr)propPtr, readType);
+					if (memValue == null)
+						return;
+
+					if (type.IsEnum)
+						memValue = Enum.ToObject(type, memValue);
+					else if (memValue is MemoryService.OneByteBool obb)
+						memValue = obb.Value;
+				}
+				else
+				{
+					IntPtr bindAddress = bind.GetAddress();
+					if (bindAddress == IntPtr.Zero || bindAddress.ToInt64() < 0 || bindAddress == bind.LastFailureAddress)
+						return;
+
+					memValue = MemoryService.Read(bindAddress, bind.Type);
+				}
 
 				// We're only interested in binds that have changed
 				if (bind.LastValue != null && bind.LastValue.Equals(memValue))
@@ -998,7 +1054,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	/// <remarks>
 	/// An internal method is used to allow for recursion on locked objects.
 	/// </remarks>
-	private void SynchronizeInternal(List<MemoryBase> locked)
+	private unsafe void SynchronizeInternal(List<MemoryBase> locked)
 	{
 		if (this.Address == IntPtr.Zero)
 			return;
@@ -1010,6 +1066,17 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 			for (int i = 0; i < locked.Count; ++i)
 			{
 				var current = locked[i];
+
+				// If an array element, direct property binds were already processed by the parent array's sync pass, so skip.
+				if (current.Parent is IArrayMemory && locked.Contains(current.Parent))
+				{
+					if (current is IArrayMemory nestedArray)
+					{
+						nestedArray.ReadArrayMemory(locked);
+					}
+
+					continue;
+				}
 
 				// Process standard binds
 				foreach (PropertyBindInfo bind in current.Binds.Values)
@@ -1043,7 +1110,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	/// <param name="bind">The property bind information.</param>
 	/// <param name="value">The value to set.</param>
 	/// <remarks>
-	/// This is used in <see cref="ReadFromMemory(PropertyBindInfo, List{MemoryBase})"/> to ensure that memory changes
+	/// This is used in <see cref="ReadFromMemory"/> to ensure that memory changes
 	/// that originate from the game do not get processed via the OnSelfPropertyChanged, which is
 	/// intended to be called only for user-initiated changes (incl. history).
 	/// </remarks>
