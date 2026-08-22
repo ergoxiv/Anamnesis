@@ -1,4 +1,4 @@
-﻿// © Anamnesis.
+// © Anamnesis.
 // Licensed under the MIT license.
 
 namespace Anamnesis.Core;
@@ -269,8 +269,7 @@ public class Bone : ITransform
 	/// Snapshots are primarily used by the skeleton object to optimize memory reads.
 	/// </remarks>
 	/// <param name="readChildren">Whether to read the transforms of child bones.</param>
-	/// <param name="snapshot">An optional snapshot of transforms to use instead of memory.</param>
-	public virtual void ReadTransform(bool readChildren = false, Dictionary<string, Transform>? snapshot = null)
+	public virtual void ReadTransform(bool readChildren = false)
 	{
 		if (this.TransformMemories.Count == 0)
 			return;
@@ -284,41 +283,31 @@ public class Bone : ITransform
 			{
 				Bone currentBone = bonesToProcess.Pop();
 
-				// Use snapshot if available, otherwise use values from memory
-				// Note: Values are expected to be in model space
-				Transform localTransform;
-				if (snapshot != null && snapshot.TryGetValue(currentBone.Name, out var transform))
+				var transformStruct = currentBone.TransformMemories[0].Transform;
+				var localTransform = new Transform
 				{
-					localTransform = transform;
-				}
-				else
-				{
-					var transformMemory = currentBone.TransformMemories[0];
-					localTransform = new Transform
-					{
-						Position = transformMemory.Position,
-						Rotation = transformMemory.Rotation,
-						Scale = transformMemory.Scale,
-					};
-				}
+					Position = transformStruct.Position,
+					Rotation = transformStruct.Rotation,
+					Scale = transformStruct.Scale,
+				};
 
 				// Convert the character-relative transform into a parent-relative transform
 				if (currentBone.Parent != null)
 				{
 					Transform parentTransform;
-					if (snapshot != null && snapshot.TryGetValue(currentBone.Parent.Name, out var parentSnapshot))
+					if (currentBone.Parent.TransformMemories.Count > 0)
 					{
-						parentTransform = parentSnapshot;
+						var parentTransformStruct = currentBone.Parent.TransformMemories[0].Transform;
+						parentTransform = new Transform
+						{
+							Position = parentTransformStruct.Position,
+							Rotation = parentTransformStruct.Rotation,
+							Scale = parentTransformStruct.Scale,
+						};
 					}
 					else
 					{
-						var parentTransformMemory = currentBone.Parent.TransformMemories[0];
-						parentTransform = new Transform
-						{
-							Position = parentTransformMemory.Position,
-							Rotation = parentTransformMemory.Rotation,
-							Scale = parentTransformMemory.Scale,
-						};
+						parentTransform = default;
 					}
 
 					localTransform = ModelToLocalSpace(localTransform, parentTransform);

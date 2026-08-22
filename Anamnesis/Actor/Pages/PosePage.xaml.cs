@@ -1,4 +1,4 @@
-﻿// © Anamnesis.
+// © Anamnesis.
 // Licensed under the MIT license.
 
 namespace Anamnesis.Actor.Pages;
@@ -41,7 +41,7 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 
 	public static readonly Lazy<WorkQueue> WorkQueue = new(() => new WorkQueue());
 
-	private const int MAX_SKELETON_CREATION_ATTEMPTS = 3;
+	private const int MAX_SKELETON_CREATION_ATTEMPTS = 10;
 
 	private static readonly Type[] s_poseFileTypes =
 	[
@@ -1224,6 +1224,8 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 				try
 				{
 					skeleton.Synchronize();
+					actor.DrawData.MainHand?.Model?.Skeleton?.Synchronize();
+					actor.DrawData.OffHand?.Model?.Skeleton?.Synchronize();
 				}
 				catch (Exception ex)
 				{
