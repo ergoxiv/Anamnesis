@@ -1138,6 +1138,8 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	{
 		MemoryBase? current = this;
 		int ancestorCount = context.BindPath.Count;
+		bool hasAnySubscribers = current.PropertyChanged != null;
+
 		while (current != null)
 		{
 			if (current.parent == null)
@@ -1148,16 +1150,28 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 
 			ancestorCount++;
 			current = current.parent;
+
+			if (current.PropertyChanged != null)
+				hasAnySubscribers = true;
 		}
+
+		// If nobody is interested in the entire ancestor chain, don't propagate
+		if (!hasAnySubscribers)
+			return;
 
 		// Resize the bind info list that that we know total capacity
 		context.BindPath.Capacity = ancestorCount;
 
-		var args = new MemObjPropertyChangedEventArgs(propertyName, context);
+		MemObjPropertyChangedEventArgs? args = null;
 		current = this;
 		while (current != null)
 		{
-			current.PropertyChanged?.Invoke(current, args);
+			var handler = current.PropertyChanged;
+			if (handler != null)
+			{
+				args ??= new MemObjPropertyChangedEventArgs(propertyName, context);
+				handler.Invoke(current, args);
+			}
 
 			if (current.parent == null)
 				break;
