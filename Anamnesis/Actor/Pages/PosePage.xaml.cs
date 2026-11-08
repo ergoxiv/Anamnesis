@@ -1221,22 +1221,20 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 				{
 					this.Skeleton?.WriteSkeleton();
 				}
-				else
-				{
-					this.Skeleton?.Actor?.Do(actor =>
-					{
-						try
-						{
-							actor.SynchronizeSkeletons(s_transformSyncGroups);
-						}
-						catch (Exception ex)
-						{
-							Log.Verbose(ex, "Failed to sync skeleton during skeleton finalization.");
-						}
-					});
 
-					this.Skeleton?.ReadTransforms();
-				}
+				this.Skeleton?.Actor?.Do(actor =>
+				{
+					try
+					{
+						actor.SynchronizeSkeletons(s_transformSyncGroups);
+					}
+					catch (Exception ex)
+					{
+						Log.Verbose(ex, "Failed to sync skeleton during skeleton finalization.");
+					}
+				});
+
+				this.Skeleton?.ReadTransforms();
 			}
 		}
 		catch (Exception ex)

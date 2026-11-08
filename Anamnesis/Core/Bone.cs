@@ -3,6 +3,7 @@
 
 namespace Anamnesis.Core;
 
+using Anamnesis.Actor.Posing;
 using Anamnesis.Memory;
 using Anamnesis.Services;
 using Microsoft.Extensions.ObjectPool;
@@ -181,8 +182,8 @@ public class Bone : ITransform
 	}
 
 	/// <summary>
-	/// Gets a value indicating whether the object's transform
-	/// has been modified since the last synchronization.
+	/// Gets a value indicating whether the object's transform has been
+	/// modified by Anamnesis but not synchronized with the game's memory.
 	/// </summary>
 	public bool IsDirty
 	{
@@ -334,6 +335,7 @@ public class Bone : ITransform
 					currentBone.Rotation = localTransform.Rotation;
 					currentBone.Scale = localTransform.Scale;
 					currentBone.hasInitialReading = true;
+					currentBone.isDirty = false;
 				}
 				finally
 				{
