@@ -137,3 +137,10 @@ public static class Human
 	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
 	public unsafe delegate bool UpdateDrawData(nint hPtr, byte* data, bool skipEquipment);
 }
+
+public static class ProceduralBoneDriver
+{
+	[FunctionBind("4C 8B DC 53 56 57 41 56 41 57 48 81 EC ?? ?? ?? ?? 41 0F 29 73")]
+	[UnmanagedFunctionPointer(CallingConvention.ThisCall)]
+	public unsafe delegate nint ApplyRootRelativeModelTransform(nint modifierPtr, HkaQuaternion* deltaRotation, nint posePtr);
+}

@@ -17,6 +17,9 @@ using HkaPoseStruct = Interop.Types.HkaPose;
 /// A driver class for controlling the havok animation engine within
 /// the game to enable pose functionality within GPose.
 /// </summary>
+/// <remarks>
+/// Credits to the Ktisis team and Karou for discovering the solution for the bone drifting issue.
+/// </remarks>
 [RequiresUnreferencedCode("This class is not trimming-safe")]
 [RequiresDynamicCode("This class requires dynamic code due to hook reflection")]
 public sealed class PosingDriver : DriverBase<PosingDriver>
@@ -39,6 +42,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 	private FunctionHook<GameObjectDelegates.UpdateVisualPosition>? hookUpdateVisualPosition;
 	private FunctionHook<GameObjectDelegates.UpdateVisualRotation>? hookUpdateVisualRotation;
 	private FunctionHook<GameObjectDelegates.UpdateVisualScale>? hookUpdateVisualScale;
+	private FunctionHook<ProceduralBoneDriver.ApplyRootRelativeModelTransform>? hookProceduralBone;
 
 	private GameObjectDelegates.SetPosition? setPositionDetour;
 	private HkaPartialSkeleton.SetBoneModelTransform? physicsDetour;
@@ -49,6 +53,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 	private GameObjectDelegates.UpdateVisualPosition? updateVisualPositionDetour;
 	private GameObjectDelegates.UpdateVisualRotation? updateVisualRotationDetour;
 	private GameObjectDelegates.UpdateVisualScale? updateVisualScaleDetour;
+	private ProceduralBoneDriver.ApplyRootRelativeModelTransform? proceduralBoneDetour;
 
 	private volatile bool isPosingEnabled = false;
 	private volatile bool arePhysicsFrozen = false;
@@ -84,6 +89,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 				this.updateVisualPositionDetour = this.DetourUpdateVisualPosition;
 				this.updateVisualRotationDetour = this.DetourUpdateVisualRotation;
 				this.updateVisualScaleDetour = this.DetourUpdateVisualScale;
+				this.proceduralBoneDetour = this.DetourApplyRootRelativeModelTransform;
 
 				this.hookPhysics = HookRegistry.CreateAndActivateHook(this.physicsDetour);
 				this.hookLookAt = HookRegistry.CreateAndActivateHook(this.lookAtDetour);
@@ -94,6 +100,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 				this.hookUpdateVisualPosition = HookRegistry.CreateAndActivateHook(this.updateVisualPositionDetour);
 				this.hookUpdateVisualRotation = HookRegistry.CreateAndActivateHook(this.updateVisualRotationDetour);
 				this.hookUpdateVisualScale = HookRegistry.CreateAndActivateHook(this.updateVisualScaleDetour);
+				this.hookProceduralBone = HookRegistry.CreateAndActivateHook(this.proceduralBoneDetour);
 			}
 
 			this.gposeDriver.StateChanged += this.OnGposeStateChanged;
@@ -148,6 +155,7 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 		this.hookUpdateVisualPosition?.Dispose();
 		this.hookUpdateVisualRotation?.Dispose();
 		this.hookUpdateVisualScale?.Dispose();
+		this.hookProceduralBone?.Dispose();
 	}
 
 	private unsafe nint DetourSetBoneModelTransform(nint partialPtr, ulong boneId, HkaTransform4* transform, byte bUpdateSecondaryPose, byte bPropagate)
@@ -240,6 +248,17 @@ public sealed class PosingDriver : DriverBase<PosingDriver>
 			return;
 
 		this.hookUpdateVisualScale!.OriginalFunction(goPtr, a2);
+	}
+
+	private unsafe nint DetourApplyRootRelativeModelTransform(nint modifierPtr, HkaQuaternion* deltaRotation, nint posePtr)
+	{
+		if (this.isPosingEnabled && posePtr != nint.Zero)
+		{
+			HkaPoseStruct* pose = (HkaPoseStruct*)posePtr;
+			return (nint)pose->BoneFlags.Data;
+		}
+
+		return this.hookProceduralBone!.OriginalFunction(modifierPtr, deltaRotation, posePtr);
 	}
 
 	private void OnGposeStateChanged(bool isGpose)
