@@ -147,7 +147,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	/// <summary>Gets or sets the object's memory address.</summary>
 	public IntPtr Address
 	{
-		get => Interlocked.CompareExchange(ref this.address, 0, 0);
+		get => (IntPtr)Volatile.Read(ref this.address);
 		set => Interlocked.Exchange(ref this.address, value);
 	}
 
@@ -174,7 +174,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	[DoNotNotify]
 	public bool EnableReading
 	{
-		get => Interlocked.CompareExchange(ref this.enableReading, 0, 0) == 1;
+		get => Volatile.Read(ref this.enableReading) == 1;
 		set => Interlocked.Exchange(ref this.enableReading, value ? 1 : 0);
 	}
 
@@ -182,7 +182,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	[DoNotNotify]
 	public bool EnableWriting
 	{
-		get => Interlocked.CompareExchange(ref this.enableWriting, 0, 0) == 1;
+		get => Volatile.Read(ref this.enableWriting) == 1;
 		set => Interlocked.Exchange(ref this.enableWriting, value ? 1 : 0);
 	}
 
@@ -194,7 +194,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	[DoNotNotify]
 	public bool PauseSynchronization
 	{
-		get => Interlocked.CompareExchange(ref this.pauseSynchronization, 0, 0) == 1;
+		get => Volatile.Read(ref this.pauseSynchronization) == 1;
 		set => Interlocked.Exchange(ref this.pauseSynchronization, value ? 1 : 0);
 	}
 
@@ -209,7 +209,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	[DoNotNotify]
 	protected bool IsSynchronizing
 	{
-		get => Interlocked.CompareExchange(ref this.isSynchronizing, 0, 0) == 1;
+		get => Volatile.Read(ref this.isSynchronizing) == 1;
 		set => Interlocked.Exchange(ref this.isSynchronizing, value ? 1 : 0);
 	}
 
@@ -237,7 +237,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	/// <param name="propertyName">The name of the property.</param>
 	/// <remarks>
 	/// This is a custom event invoker that is used by Fody to notify of property changes.
-	/// It can  be used to manually raise property changed events in cases where the property
+	/// It can be used to manually raise property changed events in cases where the property
 	/// does not normally (e.g. the property has DoNotNotify attribute) or is not bound to a
 	/// memory address.
 	/// </remarks>
@@ -309,11 +309,11 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 			return;
 
 		// A sync is already in progress, cancel request.
-		if (Interlocked.CompareExchange(ref this.isSynchronizing, 0, 0) == 1)
+		if (Volatile.Read(ref this.isSynchronizing) == 1)
 			return;
 
 		// If synchronization is paused, cancel request.
-		if (Interlocked.CompareExchange(ref this.pauseSynchronization, 0, 0) == 1)
+		if (Volatile.Read(ref this.pauseSynchronization) == 1)
 			return;
 
 		if (inclGroups != null && exclGroups != null && inclGroups.Overlaps(exclGroups))
@@ -700,7 +700,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 		MemoryBase? current = this;
 		while (current != null)
 		{
-			if (current.IsDisposed || Interlocked.CompareExchange(ref current.enableReading, 0, 0) != 1)
+			if (current.disposed || Volatile.Read(ref current.enableReading) != 1)
 				return false;
 
 			current = current.parent;
@@ -718,7 +718,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 		MemoryBase? current = this;
 		while (current != null)
 		{
-			if (current.IsDisposed || Interlocked.CompareExchange(ref current.enableWriting, 0, 0) != 1)
+			if (current.disposed || Volatile.Read(ref current.enableWriting) != 1)
 				return false;
 
 			current = current.parent;
@@ -756,7 +756,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 		if (bind.LastValue == currentValue)
 			return;
 
-		if (!this.CanWrite(bind) || Interlocked.CompareExchange(ref this.isSynchronizing, 0, 0) == 1)
+		if (!this.CanWrite(bind) || Volatile.Read(ref this.isSynchronizing) == 1)
 		{
 			// If this bind couldn't be written right now, add it to the delayed bind list
 			// to attempt to write later.
@@ -1086,7 +1086,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 				var current = locked[i];
 
 				// If an array element, direct property binds were already processed by the parent array's sync pass, so skip.
-				if (current.parentBind is not PropertyBindInfo && current.Parent is IArrayMemory && locked.Contains(current.Parent))
+				if (current.parentBind is not PropertyBindInfo && current.Parent is IArrayMemory && current.Parent.IsSynchronizing)
 				{
 					if (current is IArrayMemory nestedArray)
 					{
