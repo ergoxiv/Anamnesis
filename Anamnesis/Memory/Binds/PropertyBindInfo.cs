@@ -5,9 +5,11 @@ namespace Anamnesis.Memory;
 
 using Anamnesis.Core.Extensions;
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 /// <summary>
 /// Represents binding information for a property.
@@ -28,6 +30,12 @@ public class PropertyBindInfo : BindInfo
 
 	/// <summary>Gets the cached offsets for the property.</summary>
 	public readonly int[] Offsets;
+
+	private static readonly ConcurrentDictionary<PropertyInfo, Func<MemoryBase, object?>> s_getterCache = new();
+	private static readonly ConcurrentDictionary<PropertyInfo, Action<MemoryBase, object?>> s_setterCache = new();
+
+	private Func<MemoryBase, object?>? fastGetter;
+	private Action<MemoryBase, object?>? fastSetter;
 
 	/// <summary>
 	/// Initializes a new instance of the <see cref="PropertyBindInfo"/> class.
@@ -106,6 +114,37 @@ public class PropertyBindInfo : BindInfo
 			bindAddress = MemoryService.Read<IntPtr>(bindAddress);
 
 		return bindAddress;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public object? GetValue(MemoryBase target)
+	{
+		var getter = this.fastGetter ??= s_getterCache.GetOrAdd(this.Property, static prop =>
+		{
+			var targetParam = Expression.Parameter(typeof(MemoryBase), "target");
+			var castTarget = Expression.Convert(targetParam, prop.DeclaringType!);
+			var getCall = Expression.Call(castTarget, prop.GetGetMethod(true)!);
+			var boxResult = Expression.Convert(getCall, typeof(object));
+			return Expression.Lambda<Func<MemoryBase, object?>>(boxResult, targetParam).Compile();
+		});
+
+		return getter(target);
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void SetValue(MemoryBase target, object? value)
+	{
+		var setter = this.fastSetter ??= s_setterCache.GetOrAdd(this.Property, static prop =>
+		{
+			var targetParam = Expression.Parameter(typeof(MemoryBase), "target");
+			var valueParam = Expression.Parameter(typeof(object), "value");
+			var castTarget = Expression.Convert(targetParam, prop.DeclaringType!);
+			var castValue = Expression.Convert(valueParam, prop.PropertyType);
+			var setCall = Expression.Call(castTarget, prop.GetSetMethod(true)!, castValue);
+			return Expression.Lambda<Action<MemoryBase, object?>>(setCall, targetParam, valueParam).Compile();
+		});
+
+		setter(target, value);
 	}
 
 	/// <summary>
