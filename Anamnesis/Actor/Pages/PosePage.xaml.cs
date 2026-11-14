@@ -606,7 +606,7 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 		this.Actor?.Do(actor =>
 		{
 			actor.Refreshed -= this.OnActorRefreshed;
-			actor.PropertyChanged -= this.OnActorPropertyChanged;
+			actor.RemovePropertyChangedListener(this.OnActorPropertyChanged);
 		});
 		this.Actor = null;
 
@@ -664,13 +664,18 @@ public partial class PosePage : UserControl, INotifyPropertyChanged
 		this.Actor?.Do(actor =>
 		{
 			actor.Refreshed -= this.OnActorRefreshed;
-			actor.PropertyChanged -= this.OnActorPropertyChanged;
+			actor.RemovePropertyChangedListener(this.OnActorPropertyChanged);
 		});
 
 		newActorHandle?.Do(actor =>
 		{
 			actor.Refreshed += this.OnActorRefreshed;
-			actor.PropertyChanged += this.OnActorPropertyChanged;
+			actor.AddPropertyChangedListener(
+				this.OnActorPropertyChanged,
+				nameof(ActorMemory.ModelObject),
+				nameof(ActorMemory.Ornament),
+				nameof(WeaponMemory.Model),
+				nameof(ActorModelMemory.Skeleton));
 		});
 
 		this.Actor = newActorHandle;

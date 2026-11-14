@@ -13,6 +13,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -56,6 +57,9 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	/// <summary>Lock object for thread synchronization.</summary>
 	private readonly Lock lockObject = new();
 
+	/// <summary>Lock object for property listener collection reads and writes.</summary>
+	private readonly Lock listenersLock = new();
+
 	/// <summary>
 	/// Represents the parent memory object, if any.
 	/// </summary>
@@ -78,6 +82,8 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	/// due to ongoing memory reads.
 	/// </remarks>
 	private ConcurrentQueue<BindInfo> delayedBinds = new();
+
+	private volatile PropertyListener[]? propertyListeners;
 
 	private nint address = IntPtr.Zero;
 	private int enableReading = 1;
@@ -237,7 +243,7 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 		if (this.IsDisposed)
 			return;
 
-		if (!this.Binds.TryGetValue(propertyName, out PropertyBindInfo? bind))
+		if (string.IsNullOrEmpty(propertyName) || this.Binds.Count == 0 || !this.Binds.TryGetValue(propertyName, out PropertyBindInfo? bind))
 		{
 			// If the bind is not found, assume it is not bound to a memory address.
 			this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -369,6 +375,71 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 			throw new KeyNotFoundException($"Failed to find bound property with name \"{propertyName}\".");
 
 		return bind.GetAddress();
+	}
+
+	/// <summary>
+	/// Adds a property change listener for one, many, or all properties with default origins (All).
+	/// </summary>
+	/// <param name="handler">The event callback that will be invoked on change.</param>
+	/// <param name="propertyNames">
+	/// A collection of zero or more properties to subscribe for.
+	/// If empty, then the event callback is invoked for all property changes.
+	/// </param>
+	public void AddPropertyChangedListener(PropertyChangedEventHandler handler, params string[] propertyNames)
+		=> this.AddPropertyChangedListener(handler, PropertyChange.Origins.All, propertyNames);
+
+	/// <summary>
+	/// Adds a property change listener for one, many, or all properties for target origins.
+	/// </summary>
+	/// <param name="handler">The event callback that will be invoked on change.</param>
+	/// <param name="origins">The property change origins to subscribe for.</param>
+	/// <param name="propertyNames">
+	/// A collection of zero or more properties to subscribe for.
+	/// If empty, then the event callback is invoked for all property changes.
+	/// </param>
+	public void AddPropertyChangedListener(PropertyChangedEventHandler handler, PropertyChange.Origins origins, params string[] propertyNames)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+		ArgumentNullException.ThrowIfNull(propertyNames);
+
+		lock (this.listenersLock)
+		{
+			var list = this.propertyListeners?.ToList() ?? [];
+			var names = propertyNames.Length == 0 ? [string.Empty] : propertyNames;
+
+			foreach (var name in names)
+			{
+				int idx = list.FindIndex(l => l.Handler == handler && l.PropertyName == name);
+				if (idx >= 0)
+					list[idx] = new PropertyListener(name, handler, list[idx].Origins | origins);
+				else
+					list.Add(new PropertyListener(name, handler, origins));
+			}
+
+			this.propertyListeners = [.. list];
+		}
+	}
+
+	/// <summary>
+	/// Removes a property change listener from one, many, or all properties.
+	/// </summary>
+	/// <param name="handler">The event callback to remove.</param>
+	/// <param name="propertyName">An optional property name to selectively remove properties from listeners with many property subscriptions.</param>
+	public void RemovePropertyChangedListener(PropertyChangedEventHandler handler, string? propertyName = null)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+
+		lock (this.listenersLock)
+		{
+			if (this.propertyListeners == null)
+				return;
+
+			var list = this.propertyListeners.ToList();
+			int removed = list.RemoveAll(l => l.Handler == handler && (propertyName == null || l.PropertyName == propertyName));
+
+			if (removed > 0)
+				this.propertyListeners = list.Count > 0 ? list.ToArray() : null;
+		}
 	}
 
 	/// <summary>
@@ -1122,45 +1193,37 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 	/// <exception cref="Exception">Thrown when the parent is not null but the parent bind is null.</exception>
 	private void PropagatePropertyChanged(string propertyName, PropertyChange context)
 	{
+		MemObjPropertyChangedEventArgs? args = null;
 		MemoryBase? current = this;
-		int ancestorCount = context.BindPath.Count;
-		bool hasAnySubscribers = current.PropertyChanged != null;
 
 		while (current != null)
 		{
+			var globalHandler = current.PropertyChanged;
+			if (globalHandler != null)
+			{
+				args ??= new MemObjPropertyChangedEventArgs(propertyName, context);
+				globalHandler.Invoke(current, args);
+			}
+
+			var listeners = current.propertyListeners;
+			if (listeners != null)
+			{
+				for (int i = 0; i < listeners.Length; i++)
+				{
+					ref readonly var listener = ref listeners[i];
+					if ((listener.Origins & context.Origin) != 0 && (listener.PropertyName.Length == 0 || listener.PropertyName == propertyName))
+					{
+						args ??= new MemObjPropertyChangedEventArgs(propertyName, context);
+						listener.Handler.Invoke(current, args);
+					}
+				}
+			}
+
 			if (current.parent == null)
 				break;
 
 			if (current.parentBind == null)
 				throw new Exception("Parent was not null, but parent bind was!");
-
-			ancestorCount++;
-			current = current.parent;
-
-			if (current.PropertyChanged != null)
-				hasAnySubscribers = true;
-		}
-
-		// If nobody is interested in the entire ancestor chain, don't propagate
-		if (!hasAnySubscribers)
-			return;
-
-		// Resize the bind info list that that we know total capacity
-		context.BindPath.Capacity = ancestorCount;
-
-		MemObjPropertyChangedEventArgs? args = null;
-		current = this;
-		while (current != null)
-		{
-			var handler = current.PropertyChanged;
-			if (handler != null)
-			{
-				args ??= new MemObjPropertyChangedEventArgs(propertyName, context);
-				handler.Invoke(current, args);
-			}
-
-			if (current.parent == null)
-				break;
 
 			context.AddPath(current.parentBind!);
 			current = current.parent;
@@ -1181,6 +1244,8 @@ public abstract class MemoryBase : INotifyPropertyChanged, IDisposable
 			bind.LastFailureAddress = IntPtr.Zero;
 		}
 	}
+
+	private readonly record struct PropertyListener(string PropertyName, PropertyChangedEventHandler Handler, PropertyChange.Origins Origins);
 
 	/// <summary>
 	/// A RAII scope that suppresses property notifications on the current thread for its duration.
